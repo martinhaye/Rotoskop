@@ -20,7 +20,8 @@ Steps **0–5** done: scaffold, emulator, assembler, YAML build/pack, Runix `rot
 | `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
 | `Tests/` | Unit/integration tests (no UI device required) |
 | `Apps/Rotoskop` | iOS app target (Xcode project) |
-| `for_ref/runix` | Full checkout of Runix on `rotoskop` (gitignored; edit here, not the main runix tree) |
+| `Scripts/run-on-device.sh` | Build + install + launch on a connected iPhone |
+| `for_ref/runix` | Editable Runix checkout on `rotoskop` (gitignored). **Only** edit Runix here—not a separate `runix` tree elsewhere. |
 
 ## Build & test (Mac)
 
@@ -32,10 +33,12 @@ swift test
 swift run rotoskop --help
 ```
 
+**Stay green** (after meaningful changes): `swift test`; `swift run rotoskop build for_ref/runix`; `swift run rotoskop run for_ref/runix --profile halt`. When touching the iOS app: `Scripts/run-on-device.sh`.
+
 ### Against Runix
 
 ```bash
-RUNIX=for_ref/runix   # rotoskop branch checkout inside this workspace
+RUNIX=for_ref/runix
 swift run rotoskop build "$RUNIX"
 swift run rotoskop run "$RUNIX" --profile halt -v --screen
 ```
@@ -44,7 +47,9 @@ swift run rotoskop run "$RUNIX" --profile halt -v --screen
 
 ```bash
 open Apps/Rotoskop/Rotoskop.xcodeproj
-# or:
+# or on a connected phone:
+Scripts/run-on-device.sh
+# or simulator:
 xcodebuild -project Apps/Rotoskop/Rotoskop.xcodeproj -scheme Rotoskop \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```

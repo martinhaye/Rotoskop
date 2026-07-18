@@ -417,8 +417,9 @@ Project nav bar shows repo name + current branch when known; actions: **Git**, p
 Runix is the grounding for assembler scope, byte-for-byte acceptance, and day-to-day playtesting.
 
 - **One repo**, two eras—not two divergent OS forks.
-- **Upstream / `main` (and `for_ref/runix`):** frozen reference. Keep the Make/ca65/`mkrunix.py` pipeline as the golden producer. Do **not** merge Rotoskop-era assembly work back into this frozen line.
-- **`rotoskop` branch:** daily driver. Add `rotoskop.yaml`, JS generate (e.g. font), `build/generated/`, and only the minimal source tweaks needed for that layout. **All new Runix development happens here**, inside Rotoskop (and the matching git remote branch).
+- **Upstream / `main`:** frozen reference in the separate Runix repo. Keep the Make/ca65/`mkrunix.py` pipeline as the golden producer. Do **not** merge Rotoskop-era assembly work back into that frozen line.
+- **`for_ref/runix` (this workspace, gitignored):** full editable checkout on the **`rotoskop`** branch—the daily driver. Edit Runix **only** here.
+- **`rotoskop` branch:** Add `rotoskop.yaml`, JS generate (e.g. font), `build/generated/`, and only the minimal source tweaks needed for that layout. **All new Runix development happens here**, inside Rotoskop (and the matching git remote branch).
 - **Equivalence:** while both pipelines exist, at a shared baseline of sources, build golden (old toolchain) vs candidate (Rotoskop) and compare `.bin` / `.2mg` (mind `.2mg` header fields).
 - **Leave Make behind:** merge **`rotoskop` → `main`**. That cutover retires the old scaffolding as the trunk; no ongoing dual-merge of assembly fixes.
 
@@ -454,8 +455,10 @@ Steps **0–5** are complete. **Next: step 6.**
 
 1. Keep this document as the single design surface.
 2. ~~Flesh out sections one at a time~~ — **done.**
-3. Implement to this document; resist scope creep.
+3. Implement to this document; resist scope creep. Do one implementation-order step at a time; do not reopen finished steps unless a regression appears.
 4. Prefer concrete decisions over inventing architecture ahead of need.
+5. **Stay green:** `swift test`; `rotoskop build for_ref/runix`; `rotoskop run for_ref/runix --profile halt`. When changing the iOS app, also `Scripts/run-on-device.sh` (see README).
+6. **Git:** commit Rotoskop at major milestones; do not push unless asked. Runix edits live only under `for_ref/runix` (its own `.git` if needed).
 
 ## Section backlog (order flexible)
 
