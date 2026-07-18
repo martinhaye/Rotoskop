@@ -69,6 +69,16 @@ struct KeyboardTests {
         #expect(kbd.readKbd() == UInt8(ascii: "B") | 0x80)
     }
 
+    @Test func rawNewlineToCR() {
+        // YAML double-quoted "halt\n" yields a real LF; map to Apple II CR.
+        let kbd = Keyboard(inputStrings: ["halt\n"])
+        for ch: UInt8 in [0x68, 0x61, 0x6C, 0x74] {
+            #expect(kbd.readKbd() == ch | 0x80)
+            kbd.clearStrobe()
+        }
+        #expect(kbd.readKbd() == 0x0D | 0x80)
+    }
+
     @Test func hexAndEscape() {
         let kbd = Keyboard(inputStrings: ["\\x1B", "\\e"])
         #expect(kbd.readKbd() == 0x1B | 0x80)

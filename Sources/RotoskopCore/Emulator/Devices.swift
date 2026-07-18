@@ -130,7 +130,12 @@ public final class Keyboard {
                     }
                 } else {
                     let scalar = s[i].unicodeScalars.first!.value
-                    result.append(UInt8(truncatingIfNeeded: scalar))
+                    if scalar == 0x0A || scalar == 0x0D {
+                        // YAML / real newlines → Apple II CR (same as \n escape)
+                        result.append(0x0D)
+                    } else {
+                        result.append(UInt8(truncatingIfNeeded: scalar))
+                    }
                     i = s.index(after: i)
                 }
             }

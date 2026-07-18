@@ -430,16 +430,16 @@ Brief build sequence. Each step should be usable/tested before piling on the nex
 
 0. ~~**Scaffold**~~ — **done**
 1. ~~**Emulation core (§6)**~~ — **done**
-2. ~~**Assembler (§4)**~~ — **done** (gaps: see [`GAPS.md`](GAPS.md) — testbcd/aoc vs ca65)
-3. ~~**Build system (§5)**~~ — **done** (`.2mg` golden pending assembler parity)
-4. ~~**Runix `rotoskop` branch**~~ — **started** (yaml + JS font; bootstub / full golden still open — [`GAPS.md`](GAPS.md))
+2. ~~**Assembler (§4)**~~ — **done**
+3. ~~**Build system (§5)**~~ — **done**
+4. ~~**Runix `rotoskop` branch**~~ — **done** (`rotoskop.yaml`, JS font, bootstub, run profiles, Make co-installed until cutover; gaps closed in [`GAPS.md`](GAPS.md))
 5. **App shell + repos/Git (§7, §1)** — iPhone portrait tabs; clone/list; PAT; thin Git ops.
 6. **File browser + editor (§2–3)** — browser; custom/disarmed editor (tabs, gestures, highlighting); autosave; diagnostics in context.
 7. **Integration** — Build/Run tabs, dirty Run→build, emulator UI keyboard, error jump, listings from `build/`.
 
 Defer polish called out as “tune in UI” until the vertical slice works.
 
-**Before step 5:** close assembler/image gaps documented in [`GAPS.md`](GAPS.md).
+**Before step 5:** assembler/image/run gaps in [`GAPS.md`](GAPS.md) are closed.
 
 ## Reference material
 

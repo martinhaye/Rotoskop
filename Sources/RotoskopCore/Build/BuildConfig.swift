@@ -65,8 +65,11 @@ public struct ProjectConfig: Sendable {
         )
     }
 
-    public func resolvedRun(profile: String?) -> RunProfile {
-        guard let profile, let overlay = profiles[profile] else { return run }
+    public func resolvedRun(profile: String?) throws -> RunProfile {
+        guard let profile else { return run }
+        guard let overlay = profiles[profile] else {
+            throw BuildError.invalidConfig("unknown run profile '\(profile)'")
+        }
         return run.merging(overlay)
     }
 }

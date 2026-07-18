@@ -26,17 +26,37 @@ struct BuildTests {
                 rtest: [rtest/*.bin]
         run:
           disk: build/out.2mg
+          load:
+            - { file: build/bootstub.bin, addr: 0x1000 }
           start: 0x1000
+          max_instructions: 100000
+        profiles:
+          halt:
+            keys: ["halt\\n"]
         """
         let cfg = try ProjectConfig.parse(yaml: yaml)
         #expect(cfg.name == "demo")
         #expect(cfg.steps.count == 2)
         #expect(cfg.run.start == 0x1000)
+        #expect(cfg.run.load.count == 1)
+        #expect(cfg.run.load[0].file == "build/bootstub.bin")
+        #expect(cfg.run.load[0].addr == 0x1000)
         if case .packImage(_, _, _, _, let dirs) = cfg.steps[1] {
             #expect(dirs.map(\.0) == ["runes", "bin", "demos", "rtest"])
         } else {
             Issue.record("expected pack_image step")
         }
+        let halt = try cfg.resolvedRun(profile: "halt")
+        #expect(halt.keys == ["halt\n"])
+        #expect(halt.disk == "build/out.2mg")
+        #expect(throws: BuildError.self) {
+            _ = try cfg.resolvedRun(profile: "missing")
+        }
+        let session = try RunSession.from(projectRoot: "/proj", config: cfg, profile: "halt")
+        #expect(session.disk == "/proj/build/out.2mg")
+        #expect(session.load.first?.file == "/proj/build/bootstub.bin")
+        #expect(session.keys == ["halt\n"])
+        #expect(session.maxInstructions == 100_000)
     }
 
     @Test func packImageHeader() {
