@@ -151,7 +151,37 @@ struct ExprParser {
 
     mutating func parse() -> Int? {
         guard pos < tokens.count else { return nil }
-        return parseOr()
+        return parseCompare()
+    }
+
+    /// ca65 BoolExpr: `= <> < > <= >=` (above bitwise/arithmetic).
+    /// Unary `<`/`>` (lo/hi byte) remain in `parseUnary`.
+    private mutating func parseCompare() -> Int? {
+        guard var left = parseOr() else { return nil }
+        while true {
+            if match(.equal) {
+                guard let right = parseOr() else { return nil }
+                left = left == right ? 1 : 0
+            } else if match(.notEqual) {
+                guard let right = parseOr() else { return nil }
+                left = left != right ? 1 : 0
+            } else if match(.le) {
+                guard let right = parseOr() else { return nil }
+                left = left <= right ? 1 : 0
+            } else if match(.ge) {
+                guard let right = parseOr() else { return nil }
+                left = left >= right ? 1 : 0
+            } else if match(.lt) {
+                guard let right = parseOr() else { return nil }
+                left = left < right ? 1 : 0
+            } else if match(.gt) {
+                guard let right = parseOr() else { return nil }
+                left = left > right ? 1 : 0
+            } else {
+                break
+            }
+        }
+        return left
     }
 
     private mutating func parseOr() -> Int? {

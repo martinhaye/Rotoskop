@@ -23,8 +23,10 @@ enum TokenKind: Equatable {
     case pipe                   // |
     case caret                  // ^
     case tilde                  // ~
-    case equal
+    case equal                  // = (equate or equality)
     case notEqual               // <>
+    case le                     // <=
+    case ge                     // >=
     case at                     // @ (cheap local prefix kept with ident usually)
     case dotIdent(String)       // .byte, .match, etc. (lowercased name without dot)
     case eol
@@ -134,8 +136,17 @@ struct Lexer {
                 advance()
                 return Token(kind: .notEqual, text: "<>", location: loc)
             }
+            if index < chars.count && chars[index] == "=" {
+                advance()
+                return Token(kind: .le, text: "<=", location: loc)
+            }
             return Token(kind: .lt, text: "<", location: loc)
-        case ">": return Token(kind: .gt, text: ">", location: loc)
+        case ">":
+            if index < chars.count && chars[index] == "=" {
+                advance()
+                return Token(kind: .ge, text: ">=", location: loc)
+            }
+            return Token(kind: .gt, text: ">", location: loc)
         case "&": return Token(kind: .amp, text: "&", location: loc)
         case ",": return Token(kind: .comma, text: ",", location: loc)
         case "(": return Token(kind: .lParen, text: "(", location: loc)

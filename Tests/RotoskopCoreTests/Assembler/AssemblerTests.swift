@@ -135,4 +135,69 @@ struct AssemblerMacroTests {
         #expect(r.succeeded, "diags: \(r.diagnostics)")
         #expect(r.binary == [0xAA, 0xA5, 0x10]) // TAX; LDA $10
     }
+
+    @Test func paramcountComparisons() {
+        // Mirrors runix call macro: .paramcount >= / = must select the right branch.
+        let src = """
+        .macro call func, arg0, arg1, arg2
+        .if .paramcount >= 5
+        nop
+        .elseif .paramcount = 4
+        lda #4
+        .elseif .paramcount = 3
+        lda #3
+        .elseif .paramcount = 2
+        lda #2
+        .else
+        lda #0
+        .endif
+        jsr func
+        .endmacro
+        .org $1000
+        call $C60, ax, &$2000
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "t.s")
+        #expect(r.succeeded, "diags: \(r.diagnostics)")
+        #expect(r.binary == [0xA9, 0x03, 0x20, 0x60, 0x0C])
+    }
+
+    @Test func ldaxAmpAddress() {
+        let src = """
+        .macro ldax arg
+        .if (.xmatch ({arg}, {ax}))
+        nop
+        .elseif (.match (.left(1, {arg}), #))
+        lda #<(.right(.tcount({arg})-1, {arg}))
+        ldx #>(.right(.tcount({arg})-1, {arg}))
+        .elseif (.match (.left(1, {arg}), &))
+        lda #<(.right(.tcount({arg})-1, {arg}))
+        cld
+        ldx #>(.right(.tcount({arg})-1, {arg}))
+        .else
+        lda arg
+        ldx 1+(arg)
+        .endif
+        .endmacro
+        .org $1000
+        ldax &$1234
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "t.s")
+        #expect(r.succeeded, "diags: \(r.diagnostics)")
+        #expect(r.binary == [0xA9, 0x34, 0xD8, 0xA2, 0x12])
+    }
+
+    @Test func brkWithSignature() {
+        let src = """
+        .org $1000
+        brk
+        brk 0
+        brk $42
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "t.s")
+        #expect(r.succeeded, "diags: \(r.diagnostics)")
+        #expect(r.binary == [0x00, 0x00, 0x00, 0x00, 0x42])
+    }
 }

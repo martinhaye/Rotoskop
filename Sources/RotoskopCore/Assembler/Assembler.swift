@@ -440,6 +440,15 @@ public final class Assembler {
             return
         }
 
+        // ca65 BRK signature: `brk n` emits $00 + low byte of n (no '#' required)
+        if mnem == "brk" {
+            let v = evalExpr(operandTokens, location: location) ?? 0
+            emitByte(0x00)
+            emitByte(UInt8(v & 0xFF))
+            noteListing(start, bytes: [0x00, UInt8(v & 0xFF)], source: "brk", location: location)
+            return
+        }
+
         // Accumulator: A
         if operandTokens.count == 1, case .ident(let a) = operandTokens[0].kind, a.lowercased() == "a" {
             if let e = entries.first(where: { $0.mode == .accum }) {
@@ -833,7 +842,8 @@ public final class Assembler {
         switch (a.kind, b.kind) {
         case (.ident(let x), .ident(let y)): return x.lowercased() == y.lowercased()
         case (.number(let x), .number(let y)): return x == y
-        case (.hash, .hash), (.amp, .amp), (.lt, .lt), (.gt, .gt): return true
+        case (.hash, .hash), (.amp, .amp), (.lt, .lt), (.gt, .gt), (.le, .le), (.ge, .ge): return true
+        case (.equal, .equal), (.notEqual, .notEqual): return true
         case (.string(let x), .string(let y)): return x == y
         case (.char(let x), .char(let y)): return x == y
         default: return a.kind == b.kind && a.text.lowercased() == b.text.lowercased()
