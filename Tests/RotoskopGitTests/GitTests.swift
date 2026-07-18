@@ -77,6 +77,43 @@ struct LocalGitOpsTests {
         #expect(FileManager.default.fileExists(atPath: repoAURL.appendingPathComponent("feature.txt").path))
     }
 
+    @Test func listsRemoteTrackingBranchesAndChecksThemOut() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rotoskop-remote-branch-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let repoURL = root.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+        try runGit(["init", "-b", "main"], in: repoURL)
+        try runGit(["config", "user.name", "Test"], in: repoURL)
+        try runGit(["config", "user.email", "test@example.com"], in: repoURL)
+        try "main\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try runGit(["add", "."], in: repoURL)
+        try runGit(["commit", "-m", "main"], in: repoURL)
+
+        try runGit(["checkout", "-b", "rotoskop"], in: repoURL)
+        try "roto\n".write(to: repoURL.appendingPathComponent("roto.txt"), atomically: true, encoding: .utf8)
+        try runGit(["add", "."], in: repoURL)
+        try runGit(["commit", "-m", "rotoskop"], in: repoURL)
+        let rotoskopOID = try runGitOutput(["rev-parse", "HEAD"], in: repoURL).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Leave only local main, but keep rotoskop as a remote-tracking ref (post-clone shape).
+        try runGit(["checkout", "main"], in: repoURL)
+        try runGit(["branch", "-D", "rotoskop"], in: repoURL)
+        try runGit(["update-ref", "refs/remotes/origin/rotoskop", rotoskopOID], in: repoURL)
+
+        let repo = try GitRepository(opening: repoURL, patStore: InMemoryPATStore())
+        let branches = try repo.listBranches()
+        #expect(branches == ["main", "rotoskop"])
+        #expect(try repo.currentBranchName() == "main")
+
+        try repo.switchBranch("rotoskop")
+        #expect(try repo.currentBranchName() == "rotoskop")
+        #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("roto.txt").path))
+        #expect(try repo.listBranches() == ["main", "rotoskop"])
+    }
+
     @Test func mergeConflictAbortsAndLeavesRepoClean() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("rotoskop-merge-\(UUID().uuidString)", isDirectory: true)
@@ -174,17 +211,23 @@ struct PATStoreTests {
 }
 
 private func runGit(_ args: [String], in directory: URL) throws {
+    _ = try runGitOutput(args, in: directory)
+}
+
+private func runGitOutput(_ args: [String], in directory: URL) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = args
     process.currentDirectoryURL = directory
     let err = Pipe()
+    let out = Pipe()
     process.standardError = err
-    process.standardOutput = Pipe()
+    process.standardOutput = out
     try process.run()
     process.waitUntilExit()
     guard process.terminationStatus == 0 else {
         let message = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         throw GitError(.other("git \(args.joined(separator: " ")) failed: \(message)"))
     }
+    return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 }

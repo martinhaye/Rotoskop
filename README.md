@@ -15,7 +15,8 @@ Steps **0–7** done: scaffold through Build/Run integration. v1 implementation 
 | `DESIGN.md` | Product/architecture design (source of truth) |
 | `Package.swift` | SwiftPM: `RotoskopCore`, `RotoskopGit`, `RotoskopUI`, `rotoskop` CLI |
 | `Sources/RotoskopCore` | Emulator, assembler, build/pack, run session |
-| `Sources/RotoskopGit` | libgit2 Git ops, Keychain PAT, project store |
+| `Sources/RotoskopGit` | Thin libgit2 wrapper (PAT, clone/push/pull, branches), Keychain, project store |
+| `.build/checkouts/libgit2/include/git2/` | libgit2 C headers (present after `swift build`; see DESIGN §1.4) |
 | `Sources/RotoskopUI` | SwiftUI shell (repos, Files, Editor, Build, Run, Git) |
 | `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
 | `Tests/` | Unit/integration tests (no UI device required) |

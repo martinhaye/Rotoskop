@@ -51,6 +51,9 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 
 - iOS has no system `git` binary → use a **libgit2**-based Swift stack (moderate dependency), shared with any Mac CLI that needs the same ops.
 - Remotes assumed GitHub HTTPS for v1; SSH optional later.
+- **Dependency:** SPM package [`ibrahimcetin/libgit2`](https://github.com/ibrahimcetin/libgit2.git) `exact: 1.9.2` (same fork SwiftGitX uses). We wrap C APIs ourselves in `Sources/RotoskopGit` (`import libgit2`)—not SwiftGitX—because we need PAT credentials, pull, and clean-merge.
+- **Headers after `swift build`:** `.build/checkouts/libgit2/include/git2/` (e.g. `branch.h`, `checkout.h`). SwiftGitX checkout may also appear under `.build/checkouts/SwiftGitX/` as reference only; do not treat it as our API layer.
+- **Branch list UX:** show local **and** remote-tracking short names; switching to a remote-only name creates a local tracking branch. New clones prefer checking out `rotoskop` when that remote branch exists.
 
 #### 1.5 Deferred / tune in UI
 

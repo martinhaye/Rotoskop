@@ -70,7 +70,14 @@ public final class GitRepository: @unchecked Sendable {
                 throw GitError.lastLibGit2(code: code)
             }
             git_repository_free(pointer)
-            return try GitRepository(opening: destination, patStore: patStore)
+            let repository = try GitRepository(opening: destination, patStore: patStore)
+            // DESIGN: clones track `rotoskop` when that remote branch exists.
+            if (try? repository.listBranches())?.contains("rotoskop") == true,
+               (try? repository.currentBranchName()) != "rotoskop"
+            {
+                try repository.switchBranch("rotoskop")
+            }
+            return repository
         }.value
     }
 
@@ -143,12 +150,13 @@ public final class GitRepository: @unchecked Sendable {
         return .other
     }
 
+    /// Local branch names plus remote-tracking short names (e.g. `origin/rotoskop` → `rotoskop`).
     public func listBranches() throws -> [String] {
         var iterator: OpaquePointer?
-        try GitError.check(git_branch_iterator_new(&iterator, repo, GIT_BRANCH_LOCAL))
+        try GitError.check(git_branch_iterator_new(&iterator, repo, GIT_BRANCH_ALL))
         defer { git_branch_iterator_free(iterator) }
 
-        var names: [String] = []
+        var names = Set<String>()
         while true {
             var ref: OpaquePointer?
             var type = GIT_BRANCH_LOCAL
@@ -158,11 +166,24 @@ public final class GitRepository: @unchecked Sendable {
             defer { git_reference_free(ref) }
             var namePtr: UnsafePointer<CChar>?
             try GitError.check(git_branch_name(&namePtr, ref))
-            if let namePtr {
-                names.append(String(cString: namePtr))
+            guard let namePtr else { continue }
+            let raw = String(cString: namePtr)
+            if type == GIT_BRANCH_REMOTE {
+                guard let short = Self.shortName(fromRemoteTracking: raw) else { continue }
+                names.insert(short)
+            } else {
+                names.insert(raw)
             }
         }
         return names.sorted()
+    }
+
+    /// `origin/feature` → `feature`; skips symbolic `origin/HEAD`.
+    private static func shortName(fromRemoteTracking raw: String) -> String? {
+        guard let slash = raw.firstIndex(of: "/") else { return nil }
+        let short = String(raw[raw.index(after: slash)...])
+        guard !short.isEmpty, short != "HEAD" else { return nil }
+        return short
     }
 
     // MARK: - Commit
@@ -259,20 +280,77 @@ public final class GitRepository: @unchecked Sendable {
     public func switchBranch(_ name: String) throws {
         var branch: OpaquePointer?
         let find = git_branch_lookup(&branch, repo, name, GIT_BRANCH_LOCAL)
-        guard find == 0, let branch else {
-            throw GitError(.branchNotFound(name))
+        if find == 0, let branch {
+            defer { git_reference_free(branch) }
+            try checkoutLocalBranch(branch)
+            return
         }
-        defer { git_reference_free(branch) }
 
-        guard let refName = git_reference_name(branch) else {
+        // No local branch: create one tracking a remote-tracking ref (e.g. origin/name).
+        let remoteTracking = try findRemoteTrackingBranch(named: name)
+        defer { git_reference_free(remoteTracking) }
+
+        var commit: OpaquePointer?
+        try GitError.check(git_reference_peel(&commit, remoteTracking, GIT_OBJECT_COMMIT))
+        defer { git_commit_free(commit) }
+
+        var local: OpaquePointer?
+        try GitError.check(git_branch_create(&local, repo, name, commit, 0))
+        defer { git_reference_free(local) }
+
+        var remoteNamePtr: UnsafePointer<CChar>?
+        try GitError.check(git_branch_name(&remoteNamePtr, remoteTracking))
+        if let remoteNamePtr {
+            _ = git_branch_set_upstream(local, remoteNamePtr)
+        }
+
+        try checkoutLocalBranch(local)
+    }
+
+    private func checkoutLocalBranch(_ branch: OpaquePointer?) throws {
+        guard let branch, let refName = git_reference_name(branch) else {
             throw GitError(.other("Could not read branch ref name"))
         }
-        try GitError.check(git_repository_set_head(repo, refName))
 
+        var commit: OpaquePointer?
+        try GitError.check(git_reference_peel(&commit, branch, GIT_OBJECT_COMMIT))
+        defer { git_commit_free(commit) }
+
+        // Checkout the tree *before* moving HEAD. set_head-first makes SAFE a no-op
+        // (target == baseline while the workdir is still on the old branch).
         var opts = git_checkout_options()
         try GitError.check(git_checkout_options_init(&opts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION)))
         opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-        try GitError.check(git_checkout_head(repo, &opts))
+        try GitError.check(git_checkout_tree(repo, commit, &opts))
+        try GitError.check(git_repository_set_head(repo, refName))
+    }
+
+    /// Prefer `origin/<name>`, otherwise any remote-tracking branch ending in `/<name>`.
+    private func findRemoteTrackingBranch(named name: String) throws -> OpaquePointer {
+        let preferred = "origin/\(name)"
+        var remote: OpaquePointer?
+        if git_branch_lookup(&remote, repo, preferred, GIT_BRANCH_REMOTE) == 0, let remote {
+            return remote
+        }
+
+        var iterator: OpaquePointer?
+        try GitError.check(git_branch_iterator_new(&iterator, repo, GIT_BRANCH_REMOTE))
+        defer { git_branch_iterator_free(iterator) }
+
+        while true {
+            var ref: OpaquePointer?
+            var type = GIT_BRANCH_REMOTE
+            let code = git_branch_next(&ref, &type, iterator)
+            if code == GIT_ITEROVER.rawValue { break }
+            try GitError.check(code)
+            var namePtr: UnsafePointer<CChar>?
+            try GitError.check(git_branch_name(&namePtr, ref))
+            if let namePtr, Self.shortName(fromRemoteTracking: String(cString: namePtr)) == name {
+                return ref!
+            }
+            git_reference_free(ref)
+        }
+        throw GitError(.branchNotFound(name))
     }
 
     // MARK: - Fetch / Push / Pull / Merge
@@ -471,16 +549,21 @@ public final class GitRepository: @unchecked Sendable {
         try GitError.check(git_repository_head(&headRef, repo))
         defer { git_reference_free(headRef) }
 
-        let targetOID = git_commit_id(commit)
-        var newRef: OpaquePointer?
-        try GitError.check(git_reference_set_target(&newRef, headRef, targetOID, "fast-forward"))
-        defer { git_reference_free(newRef) }
+        guard let refName = git_reference_name(headRef) else {
+            throw GitError(.other("Could not read HEAD ref name"))
+        }
 
+        // Checkout first, then move the branch tip (set_target invalidates headRef).
         var opts = git_checkout_options()
         try GitError.check(git_checkout_options_init(&opts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION)))
         opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
         try GitError.check(git_checkout_tree(repo, commit, &opts))
-        try GitError.check(git_repository_set_head(repo, git_reference_name(headRef)))
+
+        let targetOID = git_commit_id(commit)
+        var newRef: OpaquePointer?
+        try GitError.check(git_reference_set_target(&newRef, headRef, targetOID, "fast-forward"))
+        defer { git_reference_free(newRef) }
+        try GitError.check(git_repository_set_head(repo, refName))
 
         var oid = targetOID!.pointee
         return .fastForward(oid: Self.oidString(&oid))
