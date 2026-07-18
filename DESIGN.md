@@ -117,7 +117,7 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 
 #### 3.6 Touch & editing chrome
 
-Disable spell check, autocorrection, autocapitalization, smart quotes/dashes, loupe/hold-to-select, shake-to-undo, and other system text “helps.”
+Disable spell check, autocorrection, autocapitalization, smart quotes/dashes, loupe/hold-to-select, shake-to-undo, and other system text “helps.” Rotoskop shows a **simple custom loupe** while press-dragging the caret (not the system magnifier).
 
 | Gesture | Action |
 |---------|--------|
@@ -140,8 +140,10 @@ Scroll vs select: flick/far-drag still **scrolls**; selection persists while scr
 
 #### 3.7 Deferred
 
-- Exact assembly tab-stop positions; near-cursor / flick thresholds (tune in UI).
+- Near-cursor / flick thresholds (tune in UI).
 - Horizontal scrolling; trackpad/pointer parity; Redo if not free with Undo.
+
+Assembly tab stops (current): **4 / 12 / 22 / 32** M-widths (opcode ≈ 10% of phone width at 16pt). Retune in `AssemblyHighlighter` if needed.
 
 ### 4. Assembler (ca65 subset)
 

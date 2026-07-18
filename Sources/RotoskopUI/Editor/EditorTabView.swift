@@ -29,6 +29,9 @@ struct EditorTabView: View {
                             set: { workspace.applyEditorText($0) }
                         ),
                         fileKind: workspace.openFileKind,
+                        filePath: workspace.openFilePath,
+                        restoredScrollY: workspace.savedScrollOffsetY,
+                        onScrollYChange: { workspace.updateScrollOffsetY($0) },
                         revealLine: workspace.revealLine,
                         revealColumn: workspace.revealColumn,
                         onRevealConsumed: {
@@ -36,6 +39,7 @@ struct EditorTabView: View {
                             workspace.revealColumn = nil
                         }
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }

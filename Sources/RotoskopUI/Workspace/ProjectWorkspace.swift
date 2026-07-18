@@ -28,6 +28,9 @@ final class ProjectWorkspace: ObservableObject {
     @Published var revealLine: Int?
     @Published var revealColumn: Int?
 
+    /// Last scroll offset Y per relative path (session memory; not persisted to disk).
+    private var scrollOffsets: [String: CGFloat] = [:]
+
     @Published var buildLog: [String] = []
     @Published var buildDiagnostics: [Diagnostic] = []
     @Published var buildArtifacts: [String] = []
@@ -132,6 +135,17 @@ final class ProjectWorkspace: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Scroll Y to restore for the current file (0 if never opened this session).
+    var savedScrollOffsetY: CGFloat {
+        guard let path = openFilePath else { return 0 }
+        return scrollOffsets[path] ?? 0
+    }
+
+    func updateScrollOffsetY(_ y: CGFloat) {
+        guard let path = openFilePath else { return }
+        scrollOffsets[path] = max(0, y)
     }
 
     func openFile(_ relativePath: String) {
@@ -262,6 +276,15 @@ final class ProjectWorkspace: ObservableObject {
             } else if let open = openFilePath, open.hasPrefix(relativePath + "/") {
                 openFilePath = newRelativePath + open.dropFirst(relativePath.count)
             }
+            if let saved = scrollOffsets.removeValue(forKey: relativePath) {
+                scrollOffsets[newRelativePath] = saved
+            }
+            let prefix = relativePath + "/"
+            for key in scrollOffsets.keys.filter({ $0.hasPrefix(prefix) }) {
+                if let saved = scrollOffsets.removeValue(forKey: key) {
+                    scrollOffsets[newRelativePath + key.dropFirst(relativePath.count)] = saved
+                }
+            }
             refreshTree()
         } catch {
             errorMessage = error.localizedDescription
@@ -279,6 +302,11 @@ final class ProjectWorkspace: ObservableObject {
                 openFilePath = nil
                 documentText = ""
                 isDocumentDirty = false
+            }
+            scrollOffsets.removeValue(forKey: relativePath)
+            let prefix = relativePath + "/"
+            for key in scrollOffsets.keys.filter({ $0 == relativePath || $0.hasPrefix(prefix) }) {
+                scrollOffsets.removeValue(forKey: key)
             }
             refreshTree()
         } catch {

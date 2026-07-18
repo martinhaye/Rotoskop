@@ -39,8 +39,24 @@ struct ProjectShellView: View {
         .navigationTitle(title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        // Editor is a tab switch, not a push — hijack back so it returns to Files, not repos.
+        .navigationBarBackButtonHidden(workspace.selectedTab == .editor)
         #endif
         .toolbar {
+            #if os(iOS)
+            if workspace.selectedTab == .editor {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        workspace.selectedTab = .files
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Files")
+                        }
+                    }
+                }
+            }
+            #endif
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     Task { _ = await workspace.runBuild() }
