@@ -1,12 +1,12 @@
 # Rotoskop
 
-Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emulator. Offline-first, occasional GitHub sync. Primary project: [Runix](for_ref/runix) (via `rotoskop` branch once set up).
+Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emulator. Offline-first, occasional GitHub sync. Primary project: Runix on its `rotoskop` branch (`for_ref/runix` locally).
 
 **Audience:** one. **Design:** see [`DESIGN.md`](DESIGN.md) — implement to that document.
 
 ## Status
 
-Scaffold + emulation core + assembler + build system done. Later: Runix `rotoskop` branch wiring → app UI (see *Implementation order* in `DESIGN.md`).
+Steps **0–4** done: scaffold, emulator, ca65-subset assembler, YAML build/pack, Runix `rotoskop` branch (golden bins/`.2mg`, bootstub, `rotoskop run --profile`). **Next:** app shell + Git (§7, §1).
 
 ## Layout
 
@@ -14,11 +14,11 @@ Scaffold + emulation core + assembler + build system done. Later: Runix `rotosko
 |------|------|
 | `DESIGN.md` | Product/architecture design (source of truth) |
 | `Package.swift` | SwiftPM: `RotoskopCore` library + `rotoskop` CLI |
-| `Sources/RotoskopCore` | Shared core (emulator now; assembler/build later) |
-| `Sources/rotoskop` | Mac CLI (`rotoskop run`, later `build`) |
+| `Sources/RotoskopCore` | Emulator, assembler, build/pack, run session |
+| `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
 | `Tests/RotoskopCoreTests` | Unit/integration tests (no UI) |
-| `Apps/` | iOS app shell (step 5; placeholder for now) |
-| `for_ref/runix` | Frozen upstream Runix + pim65 reference (local; gitignored) |
+| `Apps/` | iOS app shell (step 5; placeholder) |
+| `for_ref/runix` | Local symlink to Runix (gitignored) |
 
 ## Build & test (Mac)
 
@@ -30,35 +30,29 @@ swift test
 swift run rotoskop --help
 ```
 
-### Emulator CLI
+### Against Runix
 
 ```bash
-swift run rotoskop run path/to/config.json \
-  [--trace] [-n N] [--screen] [--keys STRING] [--disk image.2mg]
+RUNIX=/path/to/runix   # rotoskop branch
+swift run rotoskop build "$RUNIX"
+swift run rotoskop run "$RUNIX" --profile halt -v --screen
 ```
 
-### Assembler CLI
+### Assembler / build
 
 ```bash
 swift run rotoskop assemble path/to/file.s -o out.bin -I include/dir [--list out.lst]
-```
-
-Assembles a ca65 subset straight to a raw binary (no linker). Byte-comparable with runix’s ca65+ld65 pipeline for boot, kernel, shell, bins, and runes tested so far.
-
-### Build CLI
-
-```bash
 swift run rotoskop build [project-root]
 ```
 
-Reads `rotoskop.yaml` and runs `generate` / `assemble` / `pack_image` steps (JS generate via JavaScriptCore; `.2mg` via `runix_2mg` packer).
+Assemble is a ca65 subset → raw binary (no linker). Build reads `rotoskop.yaml` (`generate` / `assemble` / `pack_image`).
 
 ## Reference
 
 | Path | Role |
 |------|------|
 | `DESIGN.md` | Design |
-| `for_ref/runix` | Frozen Make/ca65 golden builds |
+| `for_ref/runix` | Runix daily driver + Make/ca65 golden until cutover |
 | `for_ref/runix/pim65` | Python emulator this Swift core ports/improves |
 
 ## License / ownership
