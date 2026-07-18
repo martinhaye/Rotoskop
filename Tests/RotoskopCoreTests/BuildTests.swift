@@ -20,7 +20,10 @@ struct BuildTests {
               root:
                 runix: kernel.bin
               dirs:
+                runes: [runes/*.bin]
                 bin: [bin/*.bin]
+                demos: [demos/*.bin]
+                rtest: [rtest/*.bin]
         run:
           disk: build/out.2mg
           start: 0x1000
@@ -29,6 +32,11 @@ struct BuildTests {
         #expect(cfg.name == "demo")
         #expect(cfg.steps.count == 2)
         #expect(cfg.run.start == 0x1000)
+        if case .packImage(_, _, _, _, let dirs) = cfg.steps[1] {
+            #expect(dirs.map(\.0) == ["runes", "bin", "demos", "rtest"])
+        } else {
+            Issue.record("expected pack_image step")
+        }
     }
 
     @Test func packImageHeader() {

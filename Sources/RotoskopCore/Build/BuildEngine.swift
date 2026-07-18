@@ -111,15 +111,15 @@ public final class BuildEngine {
         return produced
     }
 
-    private func runPack(out: String, boot: String, root: [String: String], dirs: [String: [String]]) throws -> String {
+    private func runPack(out: String, boot: String, root: [(String, String)], dirs: [(String, [String])]) throws -> String {
         let bootData = try Data(contentsOf: URL(fileURLWithPath: abs("\(config.buildDir)/\(boot)")))
         var rootFiles: [(String, Data)] = []
-        for (name, path) in root.sorted(by: { $0.key < $1.key }) {
+        for (name, path) in root {
             let data = try Data(contentsOf: URL(fileURLWithPath: abs("\(config.buildDir)/\(path)")))
             rootFiles.append((name, data))
         }
         var directories: [(String, [(String, Data)])] = []
-        for (dirname, patterns) in dirs.sorted(by: { $0.key < $1.key }) {
+        for (dirname, patterns) in dirs {
             var files: [(String, Data)] = []
             for pattern in patterns {
                 let matches = try expandSources([pattern], underBuild: true)

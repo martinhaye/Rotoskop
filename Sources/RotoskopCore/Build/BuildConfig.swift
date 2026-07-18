@@ -36,19 +36,22 @@ public struct ProjectConfig: Sendable {
     }
 
     public static func parse(yaml text: String) throws -> ProjectConfig {
-        guard let root = try Yams.load(yaml: text) as? [String: Any] else {
+        guard let rootNode = try Yams.compose(yaml: text) else {
+            throw BuildError.invalidConfig("empty yaml")
+        }
+        guard let root = rootNode.mapping else {
             throw BuildError.invalidConfig("root must be a mapping")
         }
-        let name = root["name"] as? String ?? "project"
-        let includeDirs = (root["include_dirs"] as? [Any])?.compactMap { $0 as? String } ?? []
-        let buildDir = root["build_dir"] as? String ?? "build"
-        let steps = try parseSteps(root["steps"] as? [Any] ?? [])
-        let run = parseRun(root["run"] as? [String: Any] ?? [:])
+        let name = root["name"]?.string ?? "project"
+        let includeDirs = root["include_dirs"]?.sequence?.compactMap(\.string) ?? []
+        let buildDir = root["build_dir"]?.string ?? "build"
+        let steps = try parseSteps(root["steps"]?.sequence ?? [])
+        let run = parseRunNode(root["run"])
         var profiles: [String: RunProfile] = [:]
-        if let pmap = root["profiles"] as? [String: Any] {
+        if let pmap = root["profiles"]?.mapping {
             for (k, v) in pmap {
-                if let d = v as? [String: Any] {
-                    profiles[k] = parseRun(d, base: run)
+                if let key = k.string {
+                    profiles[key] = parseRunNode(v, base: run)
                 }
             }
         }
@@ -71,7 +74,7 @@ public struct ProjectConfig: Sendable {
 public enum BuildStep: Sendable {
     case generate(language: String, script: String, out: String)
     case assemble(sources: [String], out: String?, outDir: String?)
-    case packImage(format: String, out: String, boot: String, root: [String: String], dirs: [String: [String]])
+    case packImage(format: String, out: String, boot: String, root: [(String, String)], dirs: [(String, [String])])
 }
 
 public struct RunProfile: Sendable {
@@ -126,51 +129,40 @@ public enum BuildError: Error, CustomStringConvertible {
     }
 }
 
-private func parseSteps(_ list: [Any]) throws -> [BuildStep] {
+private func parseSteps(_ list: Yams.Node.Sequence) throws -> [BuildStep] {
     var steps: [BuildStep] = []
     for item in list {
-        guard let map = item as? [String: Any], let (key, val) = map.first,
-              let body = val as? [String: Any] else {
+        guard let map = item.mapping, map.count == 1, let (keyNode, bodyNode) = map.first,
+              let key = keyNode.string, let body = bodyNode.mapping else {
             throw BuildError.invalidConfig("each step must be a single-key mapping")
         }
         switch key {
         case "generate":
-            let lang = body["language"] as? String ?? "js"
-            guard let script = body["script"] as? String, let out = body["out"] as? String else {
+            let lang = body["language"]?.string ?? "js"
+            guard let script = body["script"]?.string, let out = body["out"]?.string else {
                 throw BuildError.invalidConfig("generate needs script and out")
             }
             steps.append(.generate(language: lang, script: script, out: out))
         case "assemble":
             let sources: [String]
-            if let s = body["sources"] as? String {
+            if let s = body["sources"]?.string {
                 sources = [s]
-            } else if let arr = body["sources"] as? [Any] {
-                sources = arr.compactMap { $0 as? String }
+            } else if let arr = body["sources"]?.sequence {
+                sources = arr.compactMap(\.string)
             } else {
                 throw BuildError.invalidConfig("assemble needs sources")
             }
-            let out = body["out"] as? String
-            let outDir = body["out_dir"] as? String
+            let out = body["out"]?.string
+            let outDir = body["out_dir"]?.string
             steps.append(.assemble(sources: sources, out: out, outDir: outDir))
         case "pack_image":
-            let format = body["format"] as? String ?? "runix_2mg"
-            guard let out = body["out"] as? String, let boot = body["boot"] as? String else {
+            let format = body["format"]?.string ?? "runix_2mg"
+            guard let out = body["out"]?.string, let boot = body["boot"]?.string else {
                 throw BuildError.invalidConfig("pack_image needs out and boot")
             }
-            var root: [String: String] = [:]
-            if let r = body["root"] as? [String: Any] {
-                for (k, v) in r { if let s = v as? String { root[k] = s } }
-            }
-            var dirs: [String: [String]] = [:]
-            if let d = body["dirs"] as? [String: Any] {
-                for (k, v) in d {
-                    if let s = v as? String {
-                        dirs[k] = [s]
-                    } else if let arr = v as? [Any] {
-                        dirs[k] = arr.compactMap { $0 as? String }
-                    }
-                }
-            }
+            // Preserve YAML key order (mkrunix: runes, bin, demos, rtest).
+            let root = orderedStringMap(body["root"]?.mapping)
+            let dirs = orderedStringListMap(body["dirs"]?.mapping)
             steps.append(.packImage(format: format, out: out, boot: boot, root: root, dirs: dirs))
         default:
             throw BuildError.invalidConfig("unknown step kind '\(key)'")
@@ -179,34 +171,60 @@ private func parseSteps(_ list: [Any]) throws -> [BuildStep] {
     return steps
 }
 
-private func parseRun(_ map: [String: Any], base: RunProfile = RunProfile()) -> RunProfile {
+private func orderedStringMap(_ mapping: Yams.Node.Mapping?) -> [(String, String)] {
+    guard let mapping else { return [] }
+    var result: [(String, String)] = []
+    for (k, v) in mapping {
+        if let key = k.string, let val = v.string {
+            result.append((key, val))
+        }
+    }
+    return result
+}
+
+private func orderedStringListMap(_ mapping: Yams.Node.Mapping?) -> [(String, [String])] {
+    guard let mapping else { return [] }
+    var result: [(String, [String])] = []
+    for (k, v) in mapping {
+        guard let key = k.string else { continue }
+        if let s = v.string {
+            result.append((key, [s]))
+        } else if let arr = v.sequence {
+            result.append((key, arr.compactMap(\.string)))
+        }
+    }
+    return result
+}
+
+private func parseRunNode(_ node: Yams.Node?, base: RunProfile = RunProfile()) -> RunProfile {
+    guard let map = node?.mapping else { return base }
     var load: [(String, UInt16)] = base.load
-    if let arr = map["load"] as? [Any] {
+    if let arr = map["load"]?.sequence {
         load = []
         for item in arr {
-            if let m = item as? [String: Any],
-               let file = m["file"] as? String,
-               let addr = parseAddr(m["addr"]) {
+            if let m = item.mapping,
+               let file = m["file"]?.string,
+               let addr = parseAddrNode(m["addr"]) {
                 load.append((file, addr))
             }
         }
     }
+    let keys = map["keys"]?.sequence?.compactMap(\.string) ?? base.keys
     return RunProfile(
-        disk: map["disk"] as? String ?? base.disk,
+        disk: map["disk"]?.string ?? base.disk,
         load: load,
-        start: parseAddr(map["start"]) ?? base.start,
-        maxInstructions: (map["max_instructions"] as? Int) ?? base.maxInstructions,
-        keys: (map["keys"] as? [Any])?.compactMap { $0 as? String } ?? base.keys,
-        trace: (map["trace"] as? Bool) ?? base.trace,
-        screen: (map["screen"] as? Bool) ?? base.screen
+        start: parseAddrNode(map["start"]) ?? base.start,
+        maxInstructions: map["max_instructions"]?.int ?? base.maxInstructions,
+        keys: keys,
+        trace: map["trace"]?.bool ?? base.trace,
+        screen: map["screen"]?.bool ?? base.screen
     )
 }
 
-private func parseAddr(_ value: Any?) -> UInt16? {
-    guard let value else { return nil }
-    if let n = value as? Int { return UInt16(truncatingIfNeeded: n) }
-    if let n = value as? NSNumber { return UInt16(truncatingIfNeeded: n.intValue) }
-    if let s = value as? String {
+private func parseAddrNode(_ node: Yams.Node?) -> UInt16? {
+    guard let node else { return nil }
+    if let n = node.int { return UInt16(truncatingIfNeeded: n) }
+    if let s = node.string {
         var t = s.trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("0x") || t.hasPrefix("0X") { t = String(t.dropFirst(2)) }
         if t.hasPrefix("$") { t = String(t.dropFirst()) }
