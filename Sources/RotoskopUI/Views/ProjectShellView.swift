@@ -1,28 +1,32 @@
 import RotoskopGit
 import SwiftUI
 
-/// Project shell with portrait tabs (DESIGN §7.2). Files/Editor/Build/Run are stubs until steps 6–7.
+/// Project shell with portrait tabs (DESIGN §7.2). Build/Run remain stubs until step 7.
 struct ProjectShellView: View {
     let project: ProjectRecord
     @ObservedObject var model: AppModel
+    @StateObject private var workspace: ProjectWorkspace
     @State private var showGit = false
     @State private var branchName: String?
 
-    var body: some View {
-        TabView {
-            PlaceholderTab(
-                title: "Files",
-                systemImage: "folder",
-                message: "File browser arrives in step 6."
-            )
-            .tabItem { Label("Files", systemImage: "folder") }
+    init(project: ProjectRecord, model: AppModel) {
+        self.project = project
+        self.model = model
+        let root = model.store.localURL(for: project)
+        _workspace = StateObject(
+            wrappedValue: ProjectWorkspace(rootURL: root, projectName: project.name)
+        )
+    }
 
-            PlaceholderTab(
-                title: "Editor",
-                systemImage: "chevron.left.forwardslash.chevron.right",
-                message: "Editor arrives in step 6."
-            )
-            .tabItem { Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right") }
+    var body: some View {
+        TabView(selection: $workspace.selectedTab) {
+            FileBrowserView(workspace: workspace)
+                .tabItem { Label("Files", systemImage: "folder") }
+                .tag(ProjectWorkspace.Tab.files)
+
+            EditorTabView(workspace: workspace)
+                .tabItem { Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right") }
+                .tag(ProjectWorkspace.Tab.editor)
 
             PlaceholderTab(
                 title: "Build",
@@ -30,6 +34,7 @@ struct ProjectShellView: View {
                 message: "Build UI arrives in step 7."
             )
             .tabItem { Label("Build", systemImage: "hammer") }
+            .tag(ProjectWorkspace.Tab.build)
 
             PlaceholderTab(
                 title: "Run",
@@ -37,6 +42,7 @@ struct ProjectShellView: View {
                 message: "Emulator UI arrives in step 7."
             )
             .tabItem { Label("Run", systemImage: "play.fill") }
+            .tag(ProjectWorkspace.Tab.run)
         }
         .navigationTitle(title)
         #if os(iOS)
@@ -52,8 +58,17 @@ struct ProjectShellView: View {
                 GitSheetView(project: project, model: model)
             }
         }
+        .alert("Error", isPresented: errorPresented) {
+            Button("OK", role: .cancel) { workspace.errorMessage = nil }
+        } message: {
+            Text(workspace.errorMessage ?? "")
+        }
         .task {
+            workspace.refreshTree()
             branchName = try? model.store.openRepository(for: project).currentBranchName()
+        }
+        .onDisappear {
+            workspace.flushBeforeLeaving()
         }
     }
 
@@ -62,6 +77,13 @@ struct ProjectShellView: View {
             return "\(project.name) · \(branchName)"
         }
         return project.name
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(
+            get: { workspace.errorMessage != nil },
+            set: { if !$0 { workspace.errorMessage = nil } }
+        )
     }
 }
 

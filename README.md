@@ -6,7 +6,7 @@ Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emu
 
 ## Status
 
-Steps **0–5** done: scaffold, emulator, assembler, YAML build/pack, Runix `rotoskop` branch, **app shell + Git**. **Next:** file browser + editor (§2–3).
+Steps **0–6** done: scaffold, emulator, assembler, YAML build/pack, Runix `rotoskop` branch, app shell + Git, **file browser + editor**. **Next:** Build/Run integration (§7 / step 7).
 
 ## Layout
 
@@ -16,7 +16,7 @@ Steps **0–5** done: scaffold, emulator, assembler, YAML build/pack, Runix `rot
 | `Package.swift` | SwiftPM: `RotoskopCore`, `RotoskopGit`, `RotoskopUI`, `rotoskop` CLI |
 | `Sources/RotoskopCore` | Emulator, assembler, build/pack, run session |
 | `Sources/RotoskopGit` | libgit2 Git ops, Keychain PAT, project store |
-| `Sources/RotoskopUI` | SwiftUI shell (repo list, tabs, Git sheet) |
+| `Sources/RotoskopUI` | SwiftUI shell (repos, Files, Editor, Git sheet; Build/Run next) |
 | `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
 | `Tests/` | Unit/integration tests (no UI device required) |
 | `Apps/Rotoskop` | iOS app target (Xcode project) |

@@ -54,5 +54,10 @@ let package = Package(
             dependencies: ["RotoskopGit"],
             path: "Tests/RotoskopGitTests"
         ),
+        .testTarget(
+            name: "RotoskopUITests",
+            dependencies: ["RotoskopUI"],
+            path: "Tests/RotoskopUITests"
+        ),
     ]
 )
