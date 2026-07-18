@@ -428,16 +428,18 @@ Rotoskop app clones track the **`rotoskop`** branch (until cutover, then `main`)
 
 Brief build sequence. Each step should be usable/tested before piling on the next. Details live in the sections above.
 
-0. **Scaffold** — Xcode/SwiftPM layout (app target + core library targets), folder map, `.gitignore`, expand `README.md` (what it is, point at `DESIGN.md`, how to build/run later). No product features yet.
-1. **Emulation core (§6)** — CPU, memory, devices, CLI + library; tests against pim65 expectations; private disk copy; stop reasons.
-2. **Assembler (§4)** — runix-complete subset → raw `.bin` + listings; grow tests from runix units.
-3. **Build system (§5)** — YAML pipeline, JS `generate`, `pack_image` / `runix_2mg`; CLI `rotoskop build`; golden compare vs Make pipeline.
-4. **Runix `rotoskop` branch** — add `rotoskop.yaml` + JS font generate + minimal include tweaks; wire bootstub; prove byte-compare on bins/image.
+0. ~~**Scaffold**~~ — **done**
+1. ~~**Emulation core (§6)**~~ — **done**
+2. ~~**Assembler (§4)**~~ — **done** (gaps: see [`GAPS.md`](GAPS.md) — testbcd/aoc vs ca65)
+3. ~~**Build system (§5)**~~ — **done** (`.2mg` golden pending assembler parity)
+4. ~~**Runix `rotoskop` branch**~~ — **started** (yaml + JS font; bootstub / full golden still open — [`GAPS.md`](GAPS.md))
 5. **App shell + repos/Git (§7, §1)** — iPhone portrait tabs; clone/list; PAT; thin Git ops.
 6. **File browser + editor (§2–3)** — browser; custom/disarmed editor (tabs, gestures, highlighting); autosave; diagnostics in context.
 7. **Integration** — Build/Run tabs, dirty Run→build, emulator UI keyboard, error jump, listings from `build/`.
 
 Defer polish called out as “tune in UI” until the vertical slice works.
+
+**Before step 5:** close assembler/image gaps documented in [`GAPS.md`](GAPS.md).
 
 ## Reference material
 
