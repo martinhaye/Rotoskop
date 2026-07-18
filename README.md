@@ -6,7 +6,7 @@ Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emu
 
 ## Status
 
-Scaffold + emulation core in progress. Later: assembler → build system → app UI (see *Implementation order* in `DESIGN.md`).
+Scaffold + emulation core + assembler in progress. Later: build system → app UI (see *Implementation order* in `DESIGN.md`).
 
 ## Layout
 
@@ -30,23 +30,20 @@ swift test
 swift run rotoskop --help
 ```
 
-### Emulator CLI (step 1)
+### Emulator CLI
 
 ```bash
 swift run rotoskop run path/to/config.json \
   [--trace] [-n N] [--screen] [--keys STRING] [--disk image.2mg]
 ```
 
-JSON config shape (same idea as pim65):
+### Assembler CLI
 
-```json
-{
-  "binaries": [{ "file": "prog.bin", "load_addr": "0x1000" }],
-  "start_addr": "0x1000"
-}
+```bash
+swift run rotoskop assemble path/to/file.s -o out.bin -I include/dir [--list out.lst]
 ```
 
-Open the package in Xcode via **File → Open** on `Package.swift`, or `xed .`.
+Assembles a ca65 subset straight to a raw binary (no linker). Byte-comparable with runix’s ca65+ld65 pipeline for boot, kernel, shell, bins, and runes tested so far.
 
 ## Reference
 

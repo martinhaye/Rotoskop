@@ -13,6 +13,8 @@ enum RotoskopMain {
         switch first {
         case "run":
             exit(Int32(runCommand(Array(args.dropFirst()))))
+        case "assemble", "asm":
+            exit(Int32(assembleCommand(Array(args.dropFirst()))))
         case "-h", "--help", "help":
             printUsage()
             exit(0)
@@ -25,22 +27,101 @@ enum RotoskopMain {
 
     static func printUsage() {
         let text = """
-        rotoskop — 6502 IDE tooling (emulator now; build/app later)
+        rotoskop — 6502 IDE tooling (emulator + assembler; build/app later)
 
         Usage:
           rotoskop run <config.json> [options]
+          rotoskop assemble <source.s> -o <out.bin> [-I dir] [--list out.lst]
 
-        Options:
+        Run options:
           -t, --trace                 Print instruction trace
           -n, --max-instructions N   Instruction cap (default 1000)
           -v, --verbose              Verbose output
           --screen                   Dump 40-column text screen on exit
           --keys STRING              Keyboard input (repeatable; \\n → CR)
           --disk IMAGE               .2mg disk image (slot 2)
+
+        Assemble options:
+          -o, --output PATH          Output binary (required)
+          -I, --include DIR          Include search path (repeatable)
+          --list PATH                Write listing file
           -h, --help                 Show help
 
         """
         print(text, terminator: "")
+    }
+
+    static func assembleCommand(_ args: [String]) -> Int {
+        var source: String?
+        var output: String?
+        var includes: [String] = []
+        var listPath: String?
+
+        var i = 0
+        while i < args.count {
+            let a = args[i]
+            switch a {
+            case "-o", "--output":
+                i += 1
+                guard i < args.count else { fputs("Error: \(a) needs a path\n", stderr); return 1 }
+                output = args[i]
+            case "-I", "--include":
+                i += 1
+                guard i < args.count else { fputs("Error: \(a) needs a directory\n", stderr); return 1 }
+                includes.append(args[i])
+            case "--list":
+                i += 1
+                guard i < args.count else { fputs("Error: --list needs a path\n", stderr); return 1 }
+                listPath = args[i]
+            case "-h", "--help":
+                printUsage()
+                return 0
+            default:
+                if a.hasPrefix("-") {
+                    fputs("Error: unknown option \(a)\n", stderr)
+                    return 1
+                }
+                if source != nil {
+                    fputs("Error: unexpected \(a)\n", stderr)
+                    return 1
+                }
+                source = a
+            }
+            i += 1
+        }
+
+        guard let source else {
+            fputs("Error: missing source .s file\n", stderr)
+            return 1
+        }
+        guard let output else {
+            fputs("Error: -o/--output is required\n", stderr)
+            return 1
+        }
+
+        let asm = Assembler(options: AssembleOptions(includePaths: includes, generateListing: listPath != nil))
+        let result = asm.assemble(file: source)
+        for d in result.diagnostics {
+            fputs("\(d)\n", stderr)
+        }
+        guard result.succeeded else { return 1 }
+
+        do {
+            try Data(result.binary).write(to: URL(fileURLWithPath: output))
+        } catch {
+            fputs("Error: cannot write \(output): \(error)\n", stderr)
+            return 1
+        }
+        if let listPath {
+            do {
+                try result.listing.write(toFile: listPath, atomically: true, encoding: .utf8)
+            } catch {
+                fputs("Error: cannot write listing: \(error)\n", stderr)
+                return 1
+            }
+        }
+        fputs(String(format: "Wrote %d bytes (base $%04X) to %@\n", result.binary.count, result.baseAddress, output), stderr)
+        return 0
     }
 
     static func runCommand(_ args: [String]) -> Int {
