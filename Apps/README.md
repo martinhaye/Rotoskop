@@ -8,7 +8,14 @@ iOS app shell (Implementation order step 5). **iPhone portrait only.**
 open Apps/Rotoskop/Rotoskop.xcodeproj
 ```
 
-Or build for simulator:
+**Physical phone** (connected + trusted, signing already set in Xcode):
+
+```bash
+Scripts/run-on-device.sh            # auto-pick first connected iPhone
+Scripts/run-on-device.sh Martin      # by name or UDID
+```
+
+**Simulator:**
 
 ```bash
 xcodebuild -project Apps/Rotoskop/Rotoskop.xcodeproj -scheme Rotoskop \
@@ -16,6 +23,7 @@ xcodebuild -project Apps/Rotoskop/Rotoskop.xcodeproj -scheme Rotoskop \
 ```
 
 The app target depends on the local Swift package (`RotoskopGit`, `RotoskopUI`).
+Derived data for device builds goes under `build/DerivedData-device/` (gitignored).
 
 ## What’s in v1 (step 5)
 

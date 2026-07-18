@@ -44,3 +44,6 @@ venv/
 *.2mg
 *.bin
 *.lst
+
+# Device-run derived data (Scripts/run-on-device.sh)
+build/DerivedData-device/
