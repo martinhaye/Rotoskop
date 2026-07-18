@@ -1,0 +1,28 @@
+name: mini
+include_dirs: [src]
+build_dir: build
+
+steps:
+  - generate:
+      language: js
+      script: src/gen_msg.js
+      out: build/generated/msg.inc
+
+  - assemble:
+      sources: src/main.s
+      out: main.bin
+
+  - pack_image:
+      format: runix_2mg
+      out: mini.2mg
+      boot: main.bin
+      root:
+        runix: main.bin
+      dirs: {}
+
+run:
+  disk: build/mini.2mg
+  load:
+    - { file: build/main.bin, addr: 0x1000 }
+  start: 0x1000
+  max_instructions: 100

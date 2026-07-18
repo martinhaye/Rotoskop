@@ -6,7 +6,7 @@ Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emu
 
 ## Status
 
-Scaffold + emulation core + assembler in progress. Later: build system → app UI (see *Implementation order* in `DESIGN.md`).
+Scaffold + emulation core + assembler + build system done. Later: Runix `rotoskop` branch wiring → app UI (see *Implementation order* in `DESIGN.md`).
 
 ## Layout
 
@@ -44,6 +44,14 @@ swift run rotoskop assemble path/to/file.s -o out.bin -I include/dir [--list out
 ```
 
 Assembles a ca65 subset straight to a raw binary (no linker). Byte-comparable with runix’s ca65+ld65 pipeline for boot, kernel, shell, bins, and runes tested so far.
+
+### Build CLI
+
+```bash
+swift run rotoskop build [project-root]
+```
+
+Reads `rotoskop.yaml` and runs `generate` / `assemble` / `pack_image` steps (JS generate via JavaScriptCore; `.2mg` via `runix_2mg` packer).
 
 ## Reference
 

@@ -39,7 +39,8 @@ venv/
 *~
 
 # Build artifacts (project-local, when present)
-build/
+/build/
+**/Fixtures/**/build/
 *.2mg
 *.bin
 *.lst

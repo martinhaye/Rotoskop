@@ -15,6 +15,8 @@ enum RotoskopMain {
             exit(Int32(runCommand(Array(args.dropFirst()))))
         case "assemble", "asm":
             exit(Int32(assembleCommand(Array(args.dropFirst()))))
+        case "build":
+            exit(Int32(buildCommand(Array(args.dropFirst()))))
         case "-h", "--help", "help":
             printUsage()
             exit(0)
@@ -27,28 +29,68 @@ enum RotoskopMain {
 
     static func printUsage() {
         let text = """
-        rotoskop — 6502 IDE tooling (emulator + assembler; build/app later)
+        rotoskop — 6502 IDE tooling (emulator, assembler, build)
 
         Usage:
-          rotoskop run <config.json> [options]
+          rotoskop build [project-root]
           rotoskop assemble <source.s> -o <out.bin> [-I dir] [--list out.lst]
+          rotoskop run <config.json|project-root> [options]
 
-        Run options:
+        Build:
+          Reads rotoskop.yaml; runs generate / assemble / pack_image steps.
+
+        Run options (JSON config or after build via yaml run:):
           -t, --trace                 Print instruction trace
           -n, --max-instructions N   Instruction cap (default 1000)
           -v, --verbose              Verbose output
           --screen                   Dump 40-column text screen on exit
           --keys STRING              Keyboard input (repeatable; \\n → CR)
           --disk IMAGE               .2mg disk image (slot 2)
+          --profile NAME             Overlay profile from rotoskop.yaml
 
         Assemble options:
           -o, --output PATH          Output binary (required)
           -I, --include DIR          Include search path (repeatable)
           --list PATH                Write listing file
-          -h, --help                 Show help
 
         """
         print(text, terminator: "")
+    }
+
+    static func buildCommand(_ args: [String]) -> Int {
+        var root = "."
+        var i = 0
+        while i < args.count {
+            let a = args[i]
+            if a == "-h" || a == "--help" {
+                printUsage()
+                return 0
+            }
+            if a.hasPrefix("-") {
+                fputs("Error: unknown option \(a)\n", stderr)
+                return 1
+            }
+            root = a
+            i += 1
+        }
+        do {
+            let engine = try BuildEngine(projectRoot: root)
+            let result = engine.build()
+            for d in result.diagnostics {
+                fputs("\(d)\n", stderr)
+            }
+            if result.succeeded {
+                fputs("Build OK (\(result.artifacts.count) artifacts)\n", stderr)
+                for a in result.artifacts {
+                    fputs("  \(a)\n", stderr)
+                }
+                return 0
+            }
+            return 1
+        } catch {
+            fputs("Error: \(error)\n", stderr)
+            return 1
+        }
     }
 
     static func assembleCommand(_ args: [String]) -> Int {
