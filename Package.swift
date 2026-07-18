@@ -36,7 +36,7 @@ let package = Package(
         ),
         .target(
             name: "RotoskopUI",
-            dependencies: ["RotoskopGit"],
+            dependencies: ["RotoskopGit", "RotoskopCore"],
             path: "Sources/RotoskopUI"
         ),
         .executableTarget(

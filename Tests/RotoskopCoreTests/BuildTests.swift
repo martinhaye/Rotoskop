@@ -99,6 +99,44 @@ struct BuildTests {
         _ = root
     }
 
+    @Test func assembleFailureKeepsStructuredDiagnostics() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rotoskop-bad-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let src = root.appendingPathComponent("bad.s")
+        try ".include \"does-not-exist.i\"\n".write(to: src, atomically: true, encoding: .utf8)
+        let yaml = """
+        name: bad
+        build_dir: build
+        steps:
+          - assemble:
+              sources: bad.s
+              out: bad.bin
+        """
+        try yaml.write(to: root.appendingPathComponent("rotoskop.yaml"), atomically: true, encoding: .utf8)
+
+        let engine = try BuildEngine(projectRoot: root.path)
+        let result = engine.build()
+        #expect(!result.succeeded)
+        #expect(!result.diagnostics.isEmpty)
+        #expect(result.diagnostics.contains { $0.location != nil })
+    }
+
+    @Test func dirtinessStamp() throws {
+        let fixture = findFixture()
+        let config = try ProjectConfig.load(fromProjectRoot: fixture)
+        let engine = try BuildEngine(projectRoot: fixture)
+        let result = engine.build()
+        #expect(result.succeeded)
+        #expect(!BuildDirtiness.isDirty(projectRoot: fixture, config: config))
+
+        let main = (fixture as NSString).appendingPathComponent("src/main.s")
+        let now = Date().addingTimeInterval(2)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: main)
+        #expect(BuildDirtiness.isDirty(projectRoot: fixture, config: config))
+    }
+
     private func findFixture() -> String {
         // Walk up from this source file
         var url = URL(fileURLWithPath: #filePath)

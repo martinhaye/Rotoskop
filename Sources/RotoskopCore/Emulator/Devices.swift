@@ -52,6 +52,7 @@ public final class Keyboard {
 
     private var buffer: [UInt8]
     private var index = 0
+    private let lock = NSLock()
 
     public init(inputStrings: [String]) {
         buffer = Self.parseInput(inputStrings)
@@ -59,12 +60,20 @@ public final class Keyboard {
 
     /// Push a raw key for interactive (app) mode. Value is lo-bit ASCII; hi-bit set on read.
     public func injectKey(_ key: UInt8) {
+        lock.lock()
+        defer { lock.unlock() }
         buffer.append(key)
     }
 
-    public var hasInput: Bool { index < buffer.count }
+    public var hasInput: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return index < buffer.count
+    }
 
     public func readKbd() -> UInt8 {
+        lock.lock()
+        defer { lock.unlock() }
         if index < buffer.count {
             return buffer[index] | 0x80
         }
@@ -73,7 +82,14 @@ public final class Keyboard {
 
     @discardableResult
     public func clearStrobe() -> UInt8 {
-        let result = readKbd()
+        lock.lock()
+        defer { lock.unlock() }
+        let result: UInt8
+        if index < buffer.count {
+            result = buffer[index] | 0x80
+        } else {
+            result = 0x00
+        }
         if index < buffer.count {
             index += 1
         }

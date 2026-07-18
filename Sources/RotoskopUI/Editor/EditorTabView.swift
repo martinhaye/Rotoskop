@@ -28,7 +28,13 @@ struct EditorTabView: View {
                             get: { workspace.documentText },
                             set: { workspace.applyEditorText($0) }
                         ),
-                        fileKind: workspace.openFileKind
+                        fileKind: workspace.openFileKind,
+                        revealLine: workspace.revealLine,
+                        revealColumn: workspace.revealColumn,
+                        onRevealConsumed: {
+                            workspace.revealLine = nil
+                            workspace.revealColumn = nil
+                        }
                     )
                 }
             }

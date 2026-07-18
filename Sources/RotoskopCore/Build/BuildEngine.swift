@@ -6,8 +6,15 @@ import JavaScriptCore
 public struct BuildResult: Sendable {
     public var diagnostics: [Diagnostic]
     public var artifacts: [String]
+    public var log: [String]
 
     public var succeeded: Bool { !diagnostics.contains { $0.severity == .error } }
+
+    public init(diagnostics: [Diagnostic] = [], artifacts: [String] = [], log: [String] = []) {
+        self.diagnostics = diagnostics
+        self.artifacts = artifacts
+        self.log = log
+    }
 }
 
 public final class BuildEngine {
@@ -29,6 +36,7 @@ public final class BuildEngine {
     public func build() -> BuildResult {
         var diagnostics: [Diagnostic] = []
         var artifacts: [String] = []
+        var log: [String] = []
         let buildDir = abs(config.buildDir)
         mkdirp(buildDir)
         mkdirp(abs("\(config.buildDir)/generated"))
@@ -37,24 +45,38 @@ public final class BuildEngine {
             do {
                 switch step {
                 case .generate(let language, let script, let out):
+                    log.append("generate \(script) → \(out)")
                     try runGenerate(language: language, script: script, out: out)
                     artifacts.append(abs(out))
                 case .assemble(let sources, let out, let outDir):
+                    log.append("assemble \(sources.joined(separator: ", "))")
                     let produced = try runAssemble(sources: sources, out: out, outDir: outDir)
                     artifacts.append(contentsOf: produced)
                 case .packImage(let format, let out, let boot, let root, let dirs):
+                    log.append("pack_image \(format) → \(out)")
                     guard format == "runix_2mg" else {
                         throw BuildError.stepFailed("unsupported pack format \(format)")
                     }
                     let path = try runPack(out: out, boot: boot, root: root, dirs: dirs)
                     artifacts.append(path)
                 }
+            } catch let BuildError.assembleFailed(diags) {
+                diagnostics.append(contentsOf: diags)
+                log.append("FAILED")
+                return BuildResult(diagnostics: diagnostics, artifacts: artifacts, log: log)
             } catch {
                 diagnostics.append(Diagnostic(.error, "\(error)"))
-                return BuildResult(diagnostics: diagnostics, artifacts: artifacts)
+                log.append("FAILED: \(error)")
+                return BuildResult(diagnostics: diagnostics, artifacts: artifacts, log: log)
             }
         }
-        return BuildResult(diagnostics: diagnostics, artifacts: artifacts)
+        do {
+            try BuildDirtiness.markBuilt(projectRoot: projectRoot, config: config)
+            log.append("Build OK (\(artifacts.count) artifacts)")
+        } catch {
+            log.append("Warning: could not write build stamp: \(error)")
+        }
+        return BuildResult(diagnostics: diagnostics, artifacts: artifacts, log: log)
     }
 
     // MARK: - Steps
@@ -77,7 +99,6 @@ public final class BuildEngine {
         if FileManager.default.fileExists(atPath: generated) {
             includePaths.append(generated)
         }
-        // Also allow includes next to sources (e.g. base_font.s in runes/)
         var produced: [String] = []
         let files = try expandSources(sources)
         for file in files {
@@ -88,8 +109,7 @@ public final class BuildEngine {
             let asm = Assembler(options: AssembleOptions(includePaths: paths, generateListing: true))
             let result = asm.assemble(file: file)
             if !result.succeeded {
-                let msgs = result.diagnostics.map(\.description).joined(separator: "\n")
-                throw BuildError.stepFailed("assemble \(file) failed:\n\(msgs)")
+                throw BuildError.assembleFailed(result.diagnostics)
             }
 
             let outPath: String
@@ -107,6 +127,7 @@ public final class BuildEngine {
             let lst = (outPath as NSString).deletingPathExtension + ".lst"
             try result.listing.write(toFile: lst, atomically: true, encoding: .utf8)
             produced.append(outPath)
+            produced.append(lst)
         }
         return produced
     }
@@ -187,7 +208,6 @@ public final class BuildEngine {
     }
 
     private func matchesGlob(_ pattern: String, _ name: String) -> Bool {
-        // Minimal * support
         if pattern == "*" { return true }
         if pattern.hasPrefix("*.") {
             return name.hasSuffix(String(pattern.dropFirst()))

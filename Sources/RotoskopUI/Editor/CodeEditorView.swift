@@ -7,6 +7,9 @@ import UIKit
 struct CodeEditorView: UIViewRepresentable {
     @Binding var text: String
     var fileKind: EditorInputRules.FileKind
+    var revealLine: Int?
+    var revealColumn: Int?
+    var onRevealConsumed: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -59,6 +62,12 @@ struct CodeEditorView: UIViewRepresentable {
             let selected = uiView.selectedRange
             context.coordinator.applyAttributedText(to: uiView, string: text, forceCursor: selected)
         }
+        if let line = revealLine {
+            context.coordinator.reveal(line: line, column: revealColumn ?? 1, in: uiView)
+            DispatchQueue.main.async {
+                onRevealConsumed?()
+            }
+        }
     }
 
     static func dismantleUIView(_ uiView: EditorTextView, coordinator: Coordinator) {
@@ -82,6 +91,29 @@ struct CodeEditorView: UIViewRepresentable {
         @objc func handleSelectAllNotification() {
             editor?.selectAll(nil)
             editor?.enterSelectMode()
+        }
+
+        func reveal(line: Int, column: Int, in textView: UITextView) {
+            let ns = textView.text as NSString? ?? ""
+            guard ns.length > 0 else { return }
+            var currentLine = 1
+            var index = 0
+            while index < ns.length && currentLine < line {
+                if ns.character(at: index) == 10 { // \n
+                    currentLine += 1
+                }
+                index += 1
+            }
+            var lineEnd = index
+            while lineEnd < ns.length, ns.character(at: lineEnd) != 10 {
+                lineEnd += 1
+            }
+            let col = max(1, column)
+            let caret = min(index + col - 1, lineEnd)
+            let range = NSRange(location: caret, length: 0)
+            textView.selectedRange = range
+            textView.scrollRangeToVisible(NSRange(location: index, length: max(1, lineEnd - index)))
+            textView.becomeFirstResponder()
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -321,10 +353,16 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
 struct CodeEditorView: View {
     @Binding var text: String
     var fileKind: EditorInputRules.FileKind
+    var revealLine: Int? = nil
+    var revealColumn: Int? = nil
+    var onRevealConsumed: (() -> Void)? = nil
 
     var body: some View {
         TextEditor(text: $text)
             .font(.body)
+            .onChange(of: revealLine) { _, line in
+                if line != nil { onRevealConsumed?() }
+            }
     }
 }
 

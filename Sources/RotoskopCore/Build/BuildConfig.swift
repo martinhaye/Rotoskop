@@ -124,10 +124,13 @@ public enum BuildError: Error, CustomStringConvertible {
     case invalidConfig(String)
     case stepFailed(String)
     case io(String)
+    case assembleFailed([Diagnostic])
 
     public var description: String {
         switch self {
         case .invalidConfig(let m), .stepFailed(let m), .io(let m): return m
+        case .assembleFailed(let diagnostics):
+            return diagnostics.map(\.description).joined(separator: "\n")
         }
     }
 }

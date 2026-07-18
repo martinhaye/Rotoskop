@@ -1,7 +1,7 @@
 import RotoskopGit
 import SwiftUI
 
-/// Project shell with portrait tabs (DESIGN §7.2). Build/Run remain stubs until step 7.
+/// Project shell with portrait tabs (DESIGN §7.2).
 struct ProjectShellView: View {
     let project: ProjectRecord
     @ObservedObject var model: AppModel
@@ -28,28 +28,34 @@ struct ProjectShellView: View {
                 .tabItem { Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right") }
                 .tag(ProjectWorkspace.Tab.editor)
 
-            PlaceholderTab(
-                title: "Build",
-                systemImage: "hammer",
-                message: "Build UI arrives in step 7."
-            )
-            .tabItem { Label("Build", systemImage: "hammer") }
-            .tag(ProjectWorkspace.Tab.build)
+            BuildTabView(workspace: workspace)
+                .tabItem { Label("Build", systemImage: "hammer") }
+                .tag(ProjectWorkspace.Tab.build)
 
-            PlaceholderTab(
-                title: "Run",
-                systemImage: "play.fill",
-                message: "Emulator UI arrives in step 7."
-            )
-            .tabItem { Label("Run", systemImage: "play.fill") }
-            .tag(ProjectWorkspace.Tab.run)
+            RunTabView(workspace: workspace)
+                .tabItem { Label("Run", systemImage: "play.fill") }
+                .tag(ProjectWorkspace.Tab.run)
         }
         .navigationTitle(title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    Task { _ = await workspace.runBuild() }
+                } label: {
+                    Image(systemName: "hammer")
+                }
+                .disabled(workspace.isBuilding)
+
+                Button {
+                    Task { await workspace.startRun() }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .disabled(workspace.isBuilding)
+
                 Button("Git") { showGit = true }
             }
         }
@@ -84,15 +90,5 @@ struct ProjectShellView: View {
             get: { workspace.errorMessage != nil },
             set: { if !$0 { workspace.errorMessage = nil } }
         )
-    }
-}
-
-private struct PlaceholderTab: View {
-    let title: String
-    let systemImage: String
-    let message: String
-
-    var body: some View {
-        ContentUnavailableView(title, systemImage: systemImage, description: Text(message))
     }
 }
