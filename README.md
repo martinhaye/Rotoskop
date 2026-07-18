@@ -18,7 +18,7 @@ Steps **0–4** done: scaffold, emulator, ca65-subset assembler, YAML build/pack
 | `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
 | `Tests/RotoskopCoreTests` | Unit/integration tests (no UI) |
 | `Apps/` | iOS app shell (step 5; placeholder) |
-| `for_ref/runix` | Local symlink to Runix (gitignored) |
+| `for_ref/runix` | Full checkout of Runix on `rotoskop` (gitignored; edit here, not the main runix tree) |
 
 ## Build & test (Mac)
 
@@ -33,7 +33,7 @@ swift run rotoskop --help
 ### Against Runix
 
 ```bash
-RUNIX=/path/to/runix   # rotoskop branch
+RUNIX=for_ref/runix   # rotoskop branch checkout inside this workspace
 swift run rotoskop build "$RUNIX"
 swift run rotoskop run "$RUNIX" --profile halt -v --screen
 ```
