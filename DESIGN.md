@@ -433,13 +433,13 @@ Brief build sequence. Each step should be usable/tested before piling on the nex
 2. ~~**Assembler (§4)**~~ — **done**
 3. ~~**Build system (§5)**~~ — **done**
 4. ~~**Runix `rotoskop` branch**~~ — **done** (`rotoskop.yaml`, JS font, bootstub, run profiles; Make co-installed until cutover)
-5. **App shell + repos/Git (§7, §1)** — iPhone portrait tabs; clone/list; PAT; thin Git ops.
+5. ~~**App shell + repos/Git (§7, §1)**~~ — **done** (iPhone portrait tabs; clone/list; Keychain PAT; thin Git ops via libgit2)
 6. **File browser + editor (§2–3)** — browser; custom/disarmed editor (tabs, gestures, highlighting); autosave; diagnostics in context.
 7. **Integration** — Build/Run tabs, dirty Run→build, emulator UI keyboard, error jump, listings from `build/`.
 
 Defer polish called out as “tune in UI” until the vertical slice works.
 
-Steps **0–4** are complete and regression-green (assembler/image byte-compare vs Make/ca65; `rotoskop run --profile halt`). **Next: step 5.**
+Steps **0–5** are complete. **Next: step 6.**
 
 ## Reference material
 

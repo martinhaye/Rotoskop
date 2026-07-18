@@ -6,18 +6,20 @@ Bespoke mini IDE for 6502 assembly targeting a simplified Apple II/III-style emu
 
 ## Status
 
-Steps **0–4** done: scaffold, emulator, ca65-subset assembler, YAML build/pack, Runix `rotoskop` branch (golden bins/`.2mg`, bootstub, `rotoskop run --profile`). **Next:** app shell + Git (§7, §1).
+Steps **0–5** done: scaffold, emulator, assembler, YAML build/pack, Runix `rotoskop` branch, **app shell + Git**. **Next:** file browser + editor (§2–3).
 
 ## Layout
 
 | Path | Role |
 |------|------|
 | `DESIGN.md` | Product/architecture design (source of truth) |
-| `Package.swift` | SwiftPM: `RotoskopCore` library + `rotoskop` CLI |
+| `Package.swift` | SwiftPM: `RotoskopCore`, `RotoskopGit`, `RotoskopUI`, `rotoskop` CLI |
 | `Sources/RotoskopCore` | Emulator, assembler, build/pack, run session |
+| `Sources/RotoskopGit` | libgit2 Git ops, Keychain PAT, project store |
+| `Sources/RotoskopUI` | SwiftUI shell (repo list, tabs, Git sheet) |
 | `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
-| `Tests/RotoskopCoreTests` | Unit/integration tests (no UI) |
-| `Apps/` | iOS app shell (step 5; placeholder) |
+| `Tests/` | Unit/integration tests (no UI device required) |
+| `Apps/Rotoskop` | iOS app target (Xcode project) |
 | `for_ref/runix` | Full checkout of Runix on `rotoskop` (gitignored; edit here, not the main runix tree) |
 
 ## Build & test (Mac)
@@ -36,6 +38,15 @@ swift run rotoskop --help
 RUNIX=for_ref/runix   # rotoskop branch checkout inside this workspace
 swift run rotoskop build "$RUNIX"
 swift run rotoskop run "$RUNIX" --profile halt -v --screen
+```
+
+### iOS app
+
+```bash
+open Apps/Rotoskop/Rotoskop.xcodeproj
+# or:
+xcodebuild -project Apps/Rotoskop/Rotoskop.xcodeproj -scheme Rotoskop \
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
 ### Assembler / build

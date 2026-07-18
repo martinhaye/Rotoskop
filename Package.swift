@@ -9,10 +9,15 @@ let package = Package(
     ],
     products: [
         .library(name: "RotoskopCore", targets: ["RotoskopCore"]),
+        .library(name: "RotoskopGit", targets: ["RotoskopGit"]),
+        .library(name: "RotoskopUI", targets: ["RotoskopUI"]),
         .executable(name: "rotoskop", targets: ["rotoskop"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
+        // Same libgit2 SPM fork SwiftGitX uses; we wrap it directly because we need
+        // PAT credentials, pull, and clean-merge (SwiftGitX still TODOs those).
+        .package(url: "https://github.com/ibrahimcetin/libgit2.git", exact: "1.9.2"),
     ],
     targets: [
         .target(
@@ -21,6 +26,18 @@ let package = Package(
                 .product(name: "Yams", package: "Yams"),
             ],
             path: "Sources/RotoskopCore"
+        ),
+        .target(
+            name: "RotoskopGit",
+            dependencies: [
+                .product(name: "libgit2", package: "libgit2"),
+            ],
+            path: "Sources/RotoskopGit"
+        ),
+        .target(
+            name: "RotoskopUI",
+            dependencies: ["RotoskopGit"],
+            path: "Sources/RotoskopUI"
         ),
         .executableTarget(
             name: "rotoskop",
@@ -31,6 +48,11 @@ let package = Package(
             name: "RotoskopCoreTests",
             dependencies: ["RotoskopCore"],
             path: "Tests/RotoskopCoreTests"
+        ),
+        .testTarget(
+            name: "RotoskopGitTests",
+            dependencies: ["RotoskopGit"],
+            path: "Tests/RotoskopGitTests"
         ),
     ]
 )
