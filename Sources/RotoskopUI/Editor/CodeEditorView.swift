@@ -52,7 +52,7 @@ struct CodeEditorView: UIViewRepresentable {
         view.inputAssistantItem.leadingBarButtonGroups = []
         view.inputAssistantItem.trailingBarButtonGroups = []
         view.undoManager?.removeAllActions()
-        context.coordinator.installAccessory(on: view)
+        context.coordinator.installKeyboard(on: view)
         context.coordinator.applyAttributedText(to: view, string: text, forceCursor: nil)
         context.coordinator.trackedPath = filePath
         context.coordinator.restoreScroll(restoredScrollOffset, in: container)
@@ -78,7 +78,7 @@ struct CodeEditorView: UIViewRepresentable {
         context.coordinator.editor = uiView.editor
         context.coordinator.scrollContainer = uiView
         uiView.editor.fileKind = fileKind
-        context.coordinator.installAccessory(on: uiView.editor)
+        context.coordinator.installKeyboard(on: uiView.editor)
 
         let pathChanged = context.coordinator.trackedPath != filePath
         if pathChanged {
@@ -114,20 +114,26 @@ struct CodeEditorView: UIViewRepresentable {
         var trackedPath: String?
         var isApplyingHighlight = false
         private var suppressScrollCallback = false
-        private var accessory: AssemblySymbolAccessoryBar?
+        private var keyboard: AssemblyKeyboardView?
 
         init(_ parent: CodeEditorView) {
             self.parent = parent
         }
 
-        func installAccessory(on textView: EditorTextView) {
-            if accessory == nil {
-                accessory = AssemblySymbolAccessoryBar { [weak self] symbol in
-                    self?.editor?.insertText(symbol)
-                }
-            }
-            if textView.inputAccessoryView !== accessory {
-                textView.inputAccessoryView = accessory
+        func installKeyboard(on textView: EditorTextView) {
+            if keyboard == nil {
+                keyboard = AssemblyKeyboard.install(
+                    on: textView,
+                    insert: { [weak self] text in
+                        self?.editor?.insertText(text)
+                    },
+                    delete: { [weak self] in
+                        self?.editor?.deleteBackward()
+                    }
+                )
+            } else if textView.inputView !== keyboard {
+                textView.inputView = keyboard
+                textView.inputAccessoryView = nil
                 if textView.isFirstResponder {
                     textView.reloadInputViews()
                 }

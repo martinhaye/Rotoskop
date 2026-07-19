@@ -131,7 +131,7 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
         field.onKey = { [weak coordinator = context.coordinator] text in
             coordinator?.forward(text)
         }
-        context.coordinator.installAccessory(on: field)
+        context.coordinator.installKeyboard(on: field)
         return field
     }
 
@@ -141,7 +141,7 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
         uiView.onKey = { [weak coordinator = context.coordinator] text in
             coordinator?.forward(text)
         }
-        context.coordinator.installAccessory(on: uiView)
+        context.coordinator.installKeyboard(on: uiView)
         if isEnabled {
             if !uiView.isFirstResponder {
                 // Async: becoming first responder during updateUIView is unreliable.
@@ -158,21 +158,26 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextFieldDelegate {
         var onCharacters: (String) -> Void
         weak var field: KeyInterceptField?
-        /// Keep the bar alive across representable updates.
-        private var accessory: AssemblySymbolAccessoryBar?
+        private var keyboard: AssemblyKeyboardView?
 
         init(onCharacters: @escaping (String) -> Void) {
             self.onCharacters = onCharacters
         }
 
-        func installAccessory(on field: KeyInterceptField) {
-            if accessory == nil {
-                accessory = AssemblySymbolAccessoryBar { [weak self] text in
-                    self?.forward(text)
-                }
-            }
-            if field.inputAccessoryView !== accessory {
-                field.inputAccessoryView = accessory
+        func installKeyboard(on field: KeyInterceptField) {
+            if keyboard == nil {
+                keyboard = AssemblyKeyboard.install(
+                    on: field,
+                    insert: { [weak self] text in
+                        self?.forward(text)
+                    },
+                    delete: { [weak self] in
+                        self?.forward("\u{7f}")
+                    }
+                )
+            } else if field.inputView !== keyboard {
+                field.inputView = keyboard
+                field.inputAccessoryView = nil
                 if field.isFirstResponder {
                     field.reloadInputViews()
                 }
