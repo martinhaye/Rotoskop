@@ -272,5 +272,56 @@ struct RunLimitTests {
         let reason = cpu.run(maxInstructions: 50)
         #expect(reason == .instructionLimit)
         #expect(cpu.instructionCount == 50)
+        #expect(cpu.halted == false)
+    }
+
+    @Test func runChunksResumeAfterInstructionLimit() {
+        let mem = Memory()
+        let cpu = CPU(memory: mem)
+        mem.setResetVector(0x1000)
+        mem.write(0x1000, 0xEA) // NOP
+        mem.write(0x1001, 0x4C)
+        mem.write(0x1002, 0x00)
+        mem.write(0x1003, 0x10) // JMP $1000
+        cpu.reset()
+        #expect(cpu.run(maxInstructions: 50) == .instructionLimit)
+        #expect(cpu.instructionCount == 50)
+        #expect(cpu.halted == false)
+        #expect(cpu.run(maxInstructions: 50) == .instructionLimit)
+        #expect(cpu.instructionCount == 100)
+    }
+
+    @Test func interactiveKeyHighBitWhileSpinning() throws {
+        // Runix-style: wait for $C000 hi-bit, then clear via BIT $C010.
+        let sim = Simulator(startAddress: 0x1000)
+        let kbd = sim.ensureInteractiveKeyboard()
+        let prog: [UInt8] = [
+            0xAD, 0x00, 0xC0, // LDA $C000
+            0x10, 0xFB,       // BPL *-3
+            0x29, 0x7F,       // AND #$7F
+            0x85, 0x10,       // STA $10
+            0x2C, 0x10, 0xC0, // BIT $C010
+            0xAD, 0x00, 0xC0, // LDA $C000 (should be clear)
+            0x85, 0x11,       // STA $11
+            0x4C, 0xF9, 0xFF,
+        ]
+        sim.memory.loadBinary(prog, at: 0x1000)
+        sim.memory.setResetVector(0x1000)
+        sim.cpu.reset(clearIRQVectorTracking: false)
+
+        // Spin without a key, then inject mid-run (as the UI does).
+        #expect(sim.run(maxInstructions: 100) == .instructionLimit)
+        #expect(kbd.readKbd() == 0x00)
+        kbd.injectKey(UInt8(ascii: "A"))
+        #expect(kbd.readKbd() == UInt8(ascii: "A") | 0x80)
+
+        var reason: StopReason = .instructionLimit
+        for _ in 0..<20 {
+            reason = sim.run(maxInstructions: 50)
+            if reason == .success { break }
+        }
+        #expect(reason == .success)
+        #expect(sim.memory.read(0x10) == UInt8(ascii: "A"))
+        #expect(sim.memory.read(0x11) & 0x80 == 0) // strobe cleared
     }
 }

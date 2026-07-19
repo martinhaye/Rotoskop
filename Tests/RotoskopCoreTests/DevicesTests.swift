@@ -15,7 +15,7 @@ struct TextScreenTests {
     @Test func dumpSimpleText() {
         let mem = Memory()
         for addr in 0x400..<0x800 {
-            mem.write(UInt16(addr), UInt8(ascii: " "))
+            mem.write(UInt16(addr), UInt8(ascii: " ") | 0x80)
         }
         let base = TextScreen.lineAddress(0)
         for (i, ch) in "HELLO".utf8.enumerated() {
@@ -27,7 +27,7 @@ struct TextScreenTests {
     @Test func trimBlankLinesAndWhitespace() {
         let mem = Memory()
         for addr in 0x400..<0x800 {
-            mem.write(UInt16(addr), UInt8(ascii: " "))
+            mem.write(UInt16(addr), UInt8(ascii: " ") | 0x80)
         }
         let base = TextScreen.lineAddress(5)
         for (i, ch) in "MIDDLE".utf8.enumerated() {
@@ -41,9 +41,35 @@ struct TextScreenTests {
         // already $FF
         let base = TextScreen.lineAddress(0)
         mem.write(base, UInt8(ascii: "A") | 0x80)
-        mem.write(base &+ 1, 0x01)
+        mem.write(base &+ 1, 0xFF)
         mem.write(base &+ 2, UInt8(ascii: "B") | 0x80)
         #expect(TextScreen.dump(mem) == "A B")
+    }
+
+    @Test func inverseSpaceShowsAsBlock() {
+        // Runix cursor: eor #$80 on a normal space ($A0) → $20
+        let mem = Memory()
+        for addr in 0x400..<0x800 {
+            mem.write(UInt16(addr), UInt8(ascii: " ") | 0x80)
+        }
+        let base = TextScreen.lineAddress(0)
+        for (i, ch) in "HI".utf8.enumerated() {
+            mem.write(base &+ UInt16(i), ch | 0x80)
+        }
+        mem.write(base &+ 2, 0x20) // inverse space (cursor)
+        #expect(TextScreen.dump(mem) == "HI█")
+    }
+
+    @Test func inverseControlMapsToGlyph() {
+        let mem = Memory()
+        let base = TextScreen.lineAddress(0)
+        mem.write(base, UInt8(ascii: "A") | 0x80)
+        mem.write(base &+ 1, 0x01) // inverse 'A'
+        mem.write(base &+ 2, UInt8(ascii: "B") | 0x80)
+        #expect(TextScreen.dump(mem) == "AAB")
+        let cells = TextScreen.dumpCells(mem)
+        #expect(cells[0][1].inverse == true)
+        #expect(cells[0][1].character == "A")
     }
 }
 

@@ -96,4 +96,8 @@ public final class Simulator {
     public func dumpScreen() -> String {
         TextScreen.dump(memory)
     }
+
+    public func dumpScreenCells() -> [[TextScreen.Cell]] {
+        TextScreen.dumpCells(memory)
+    }
 }

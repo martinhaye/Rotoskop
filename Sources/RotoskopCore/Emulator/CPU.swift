@@ -686,7 +686,7 @@ public final class CPU {
         }
     }
 
-    public func formatState() -> String {
+    public func formatFlags() -> String {
         var flags = ""
         flags += getFlag(Self.flagN) ? "N" : "n"
         flags += getFlag(Self.flagV) ? "V" : "v"
@@ -696,13 +696,17 @@ public final class CPU {
         flags += getFlag(Self.flagI) ? "I" : "i"
         flags += getFlag(Self.flagZ) ? "Z" : "z"
         flags += getFlag(Self.flagC) ? "C" : "c"
-        return String(format: "A=$%02X X=$%02X Y=$%02X SP=$%02X [%@]", a, x, y, sp, flags)
+        return flags
+    }
+
+    public func formatState() -> String {
+        String(format: "A=$%02X X=$%02X Y=$%02X SP=$%02X [%@]", a, x, y, sp, formatFlags())
     }
 
     public func registerDump() -> String {
         String(
-            format: "A=$%02X X=$%02X Y=$%02X SP=$%02X PC=$%04X status=$%02X %@",
-            a, x, y, sp, pc, status, formatState()
+            format: "A=$%02X X=$%02X Y=$%02X SP=$%02X PC=$%04X status=$%02X [%@]",
+            a, x, y, sp, pc, status, formatFlags()
         )
     }
 
@@ -748,14 +752,22 @@ public final class CPU {
     }
 
     /// Run until halt or instruction limit. Sets `stopReason`.
+    ///
+    /// `maxInstructions` is counted from the current `instructionCount` (i.e. each call
+    /// runs up to that many *additional* steps). Instruction-limit is a soft pause:
+    /// it does not set `halted`, so the app can call `run` again in a chunked loop.
     @discardableResult
     public func run(maxInstructions: Int = 1000) -> StopReason {
-        while instructionCount < maxInstructions {
+        if stopReason == .instructionLimit {
+            stopReason = nil
+        }
+        let limit = instructionCount + maxInstructions
+        while instructionCount < limit {
             if !step() { break }
         }
-        if !halted && instructionCount >= maxInstructions {
-            halted = true
+        if !halted && instructionCount >= limit {
             stopReason = .instructionLimit
+            return .instructionLimit
         }
         return stopReason ?? .instructionLimit
     }

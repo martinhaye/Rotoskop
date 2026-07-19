@@ -339,7 +339,7 @@ Reference: pim65’s CPU, memory, simulator, Apple II helpers, JSON load config,
 
 #### 6.3 Display & input
 
-- **Text screen (v1):** 40-column only; decode `$400–$7FF` Apple II layout to a trimmed string (hi-bit ASCII → printable), as in pim65.
+- **Text screen (v1):** 40-column only; decode `$400–$7FF` Apple II layout to a trimmed string. High bit set = normal; clear = inverse/flash (Runix cursor toggles via `eor #$80`). Inverse spaces render as `█` in plain dumps / reverse video in the app.
 - **Keyboard — CLI / tests:** scripted input strings (C-style escapes; `\n` → CR), via `$C000` / `$C010`.
 - **Keyboard — app mode:** **interactive**; UI feeds keystrokes into the same soft-switch model while the emulator runs.
 

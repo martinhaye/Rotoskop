@@ -7,40 +7,66 @@ public enum TextScreen {
     public static let cols = 40
     public static let rows = 24
 
+    public struct Cell: Equatable, Sendable {
+        public var character: Character
+        public var inverse: Bool
+    }
+
     public static func lineAddress(_ line: Int) -> UInt16 {
         let group = line / 8
         let rowInGroup = line % 8
         return UInt16(0x400 + rowInGroup * 0x80 + group * 0x28)
     }
 
-    /// Decode `$400–$7FF` Apple II text layout to a trimmed string (uses peek / dump, not hooks).
-    public static func dump(_ memory: Memory) -> String {
-        var lines: [String] = []
+    /// Decode one Apple II text-screen byte.
+    /// High bit set = normal; clear = inverse/flash (Runix cursor toggles via `eor #$80`).
+    public static func decode(_ byte: UInt8) -> Cell {
+        if byte == 0xFF {
+            return Cell(character: " ", inverse: false)
+        }
+        let inverse = (byte & 0x80) == 0
+        var ch = byte & 0x7F
+        // Inverse/flash $00–$1F are @–_ glyphs (e.g. $01 = inverse 'A').
+        if inverse && ch < 0x20 {
+            ch |= 0x40
+        }
+        if ch < 0x20 || ch > 0x7E {
+            return Cell(character: " ", inverse: inverse)
+        }
+        return Cell(character: Character(UnicodeScalar(ch)), inverse: inverse)
+    }
+
+    /// Per-row cells with trailing normal spaces trimmed (inverse spaces kept for cursor).
+    public static func dumpCells(_ memory: Memory) -> [[Cell]] {
+        var lines: [[Cell]] = []
         for row in 0..<rows {
             let base = lineAddress(row)
-            var chars: [Character] = []
+            var cells: [Cell] = []
             for col in 0..<cols {
-                let byte = memory.peek(base &+ UInt16(col))
-                let ch = byte & 0x7F
-                if byte == 0xFF || ch < 0x20 || ch > 0x7E {
-                    chars.append(" ")
-                } else {
-                    chars.append(Character(UnicodeScalar(ch)))
-                }
+                cells.append(decode(memory.peek(base &+ UInt16(col))))
             }
-            lines.append(String(chars).rstrip())
+            while let last = cells.last, last.character == " ", !last.inverse {
+                cells.removeLast()
+            }
+            lines.append(cells)
         }
         while let first = lines.first, first.isEmpty { lines.removeFirst() }
         while let last = lines.last, last.isEmpty { lines.removeLast() }
-        return lines.joined(separator: "\n")
+        return lines
     }
-}
 
-private extension String {
-    func rstrip() -> String {
-        var s = self
-        while s.last?.isWhitespace == true { s.removeLast() }
-        return s
+    /// Decode `$400–$7FF` Apple II text layout to a trimmed string (uses peek / dump, not hooks).
+    /// Inverse/flash spaces become `█` so a cursor (hi-bit cleared) stays visible after trim.
+    public static func dump(_ memory: Memory) -> String {
+        dumpCellsToString(dumpCells(memory))
+    }
+
+    public static func dumpCellsToString(_ lines: [[Cell]]) -> String {
+        lines.map { line in
+            String(line.map { cell in
+                cell.inverse && cell.character == " " ? "█" : cell.character
+            })
+        }.joined(separator: "\n")
     }
 }
 

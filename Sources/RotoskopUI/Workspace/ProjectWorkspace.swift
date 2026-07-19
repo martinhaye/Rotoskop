@@ -3,6 +3,12 @@ import RotoskopCore
 import RotoskopGit
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
 /// Shared project session: Files/Editor/Build/Run (DESIGN §2–3 / §7.2).
 @MainActor
 final class ProjectWorkspace: ObservableObject {
@@ -38,16 +44,21 @@ final class ProjectWorkspace: ObservableObject {
     @Published var lastBuildSucceeded: Bool?
 
     @Published var screenText = ""
+    @Published var screenDisplay = AttributedString()
     @Published var runStatus = "Idle"
     @Published var isRunning = false
     @Published var stopReasonText: String?
     @Published var registerDump: String?
+    /// Last key byte injected (debug aid for interactive keyboard).
+    @Published var lastInjectedKey: String?
 
     private var autosaveTask: Task<Void, Never>?
     private let autosaveDelayNanoseconds: UInt64 = 500_000_000
     private let fileManager: FileManager
     private let emuQueue = DispatchQueue(label: "rotoskop.emulator")
     private let sessionBox = EmulatorSessionBox()
+    /// Bumped on each start/stop so an old run's completion cannot clobber a newer session.
+    private var runGeneration = 0
 
     /// Thread-safe holder so the run loop stays off the MainActor.
     private final class EmulatorSessionBox: @unchecked Sendable {
@@ -55,17 +66,23 @@ final class ProjectWorkspace: ObservableObject {
         private var keyboard: Keyboard?
         private var control: RunControl?
         private weak var cpu: CPU?
+        private var generation = 0
 
-        func install(keyboard: Keyboard, control: RunControl, cpu: CPU) {
+        func install(keyboard: Keyboard, control: RunControl, cpu: CPU, generation: Int) {
             lock.lock()
             self.keyboard = keyboard
             self.control = control
             self.cpu = cpu
+            self.generation = generation
             lock.unlock()
         }
 
-        func clear() {
+        func clear(generation: Int? = nil) {
             lock.lock()
+            if let generation, self.generation != generation {
+                lock.unlock()
+                return
+            }
             keyboard = nil
             control = nil
             cpu = nil
@@ -409,9 +426,11 @@ final class ProjectWorkspace: ObservableObject {
     }
 
     func stopEmulator() {
+        runGeneration += 1
         sessionBox.stop()
         sessionBox.clear()
         isRunning = false
+        lastInjectedKey = nil
         if runStatus == "Running…" || runStatus == "Building first…" {
             runStatus = "Stopped"
         }
@@ -424,15 +443,21 @@ final class ProjectWorkspace: ObservableObject {
             if key == 0x0A { key = 0x0D }
             if key == 0x7F { key = 0x08 }
             sessionBox.injectKey(key)
+            // Show latched $C000 view (hi-bit set = key ready), not the raw inject byte.
+            lastInjectedKey = String(format: "$%02X", key | 0x80)
         }
     }
 
     private func beginEmulator(session: RunSession) {
+        runGeneration += 1
+        let generation = runGeneration
         let control = RunControl()
         isRunning = true
         stopReasonText = nil
         registerDump = nil
+        lastInjectedKey = nil
         screenText = ""
+        screenDisplay = AttributedString()
         runStatus = "Running…"
 
         emuQueue.async { [sessionBox] in
@@ -443,16 +468,18 @@ final class ProjectWorkspace: ObservableObject {
                 }
                 let kbd = sim.ensureInteractiveKeyboard()
                 try sim.load()
-                sessionBox.install(keyboard: kbd, control: control, cpu: sim.cpu)
+                sessionBox.install(keyboard: kbd, control: control, cpu: sim.cpu, generation: generation)
 
                 let chunk = 25_000
                 var finalReason: StopReason = .instructionLimit
                 while !control.isStopped {
                     let reason = sim.run(maxInstructions: chunk, trace: false)
-                    let screen = sim.dumpScreen()
+                    let cells = sim.dumpScreenCells()
+                    let screen = TextScreen.dumpCellsToString(cells)
                     DispatchQueue.main.async { [weak self] in
-                        guard let self, !control.isStopped else { return }
+                        guard let self, self.runGeneration == generation, !control.isStopped else { return }
                         self.screenText = screen
+                        self.screenDisplay = Self.attributedScreen(cells)
                     }
                     if reason != .instructionLimit {
                         finalReason = reason
@@ -464,20 +491,23 @@ final class ProjectWorkspace: ObservableObject {
                 }
 
                 let dump = sim.cpu.registerDump()
-                let screen = sim.dumpScreen()
-                sessionBox.clear()
+                let cells = sim.dumpScreenCells()
+                let screen = TextScreen.dumpCellsToString(cells)
+                sessionBox.clear(generation: generation)
                 DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.runGeneration == generation else { return }
                     self.screenText = screen
+                    self.screenDisplay = Self.attributedScreen(cells)
                     self.registerDump = dump
                     self.stopReasonText = Self.describe(finalReason)
                     self.runStatus = Self.describe(finalReason)
                     self.isRunning = false
+                    self.lastInjectedKey = nil
                 }
             } catch {
-                sessionBox.clear()
+                sessionBox.clear(generation: generation)
                 DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.runGeneration == generation else { return }
                     self.errorMessage = error.localizedDescription
                     self.runStatus = "Error"
                     self.isRunning = false
@@ -495,6 +525,31 @@ final class ProjectWorkspace: ObservableObject {
         case .explicitStop: return "Stopped"
         case .ioError(let msg): return "I/O error: \(msg)"
         }
+    }
+
+    /// Render Apple II inverse/flash (hi-bit clear) as reverse video.
+    private static func attributedScreen(_ lines: [[TextScreen.Cell]]) -> AttributedString {
+        var result = AttributedString()
+        for (i, line) in lines.enumerated() {
+            if i > 0 { result.append(AttributedString("\n")) }
+            for cell in line {
+                var piece = AttributedString(String(cell.character))
+                if cell.inverse {
+                    piece.backgroundColor = .primary
+                    piece.foregroundColor = Color(nsColorOrSystemBackground)
+                }
+                result.append(piece)
+            }
+        }
+        return result
+    }
+
+    private static var nsColorOrSystemBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemBackground)
+        #else
+        Color(nsColor: .textBackgroundColor)
+        #endif
     }
 
     private func relativize(_ path: String) -> String {
