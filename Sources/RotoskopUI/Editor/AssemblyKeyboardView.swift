@@ -29,6 +29,8 @@ final class AssemblyKeyboardView: UIInputView {
 
     private let rootStack = UIStackView()
     private var letterButtons: [KeyButton] = []
+    private var suggestionButtons: [KeyButton] = []
+    private var currentSuggestions: [String] = AssemblyKeyboardSuggestions.baseline
     private var shiftButton: KeyButton?
     private var deleteRepeatTimer: Timer?
     private var deleteRepeatCount = 0
@@ -72,11 +74,20 @@ final class AssemblyKeyboardView: UIInputView {
         }
     }
 
+    /// Refresh the letters-page suggestion row from text before the caret.
+    func updateSuggestions(beforeCaret: String) {
+        let next = AssemblyKeyboardSuggestions.symbols(beforeCaret: beforeCaret)
+        guard next != currentSuggestions else { return }
+        currentSuggestions = next
+        applySuggestionTitles()
+    }
+
     // MARK: - Layout
 
     private func rebuild() {
         rootStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         letterButtons.removeAll()
+        suggestionButtons.removeAll()
         shiftButton = nil
 
         switch page {
@@ -88,14 +99,38 @@ final class AssemblyKeyboardView: UIInputView {
     }
 
     private func buildLetters() {
-        // Top symbols by frequency in for_ref/runix hand-written .s/.i
-        // (immediate repeats collapsed, so ***** counts once).
-        addRow(["\"", ".", "\\", ";", ",", "$", "_", ":", "=", "*"])
+        addSuggestionRow(currentSuggestions)
         addRow(["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"], letterRow: true)
         addRow(["A", "S", "D", "F", "G", "H", "J", "K", "L"], letterRow: true, inset: 16)
         addLetterBottomLetterRow()
         addUtilityRow(modeTitle: "123")
         refreshLetterCase()
+    }
+
+    private func addSuggestionRow(_ titles: [String]) {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = 6
+        row.distribution = .fillEqually
+        row.alignment = .fill
+        for title in titles {
+            let key = makeCharKey(title, letterRow: false)
+            suggestionButtons.append(key)
+            row.addArrangedSubview(key)
+        }
+        rootStack.addArrangedSubview(row)
+    }
+
+    private func applySuggestionTitles() {
+        guard page == .letters else { return }
+        // Rebuild the row if the count ever drifts; normally we only retitle in place.
+        if suggestionButtons.count != currentSuggestions.count {
+            if page == .letters { rebuild() }
+            return
+        }
+        for (button, title) in zip(suggestionButtons, currentSuggestions) {
+            button.setTitle(title, for: .normal)
+        }
     }
 
     private func buildSymbols() {

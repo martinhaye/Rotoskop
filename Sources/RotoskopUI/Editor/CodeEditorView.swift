@@ -138,6 +138,14 @@ struct CodeEditorView: UIViewRepresentable {
                     textView.reloadInputViews()
                 }
             }
+            refreshKeyboardSuggestions(from: textView)
+        }
+
+        func refreshKeyboardSuggestions(from textView: UITextView) {
+            guard let keyboard else { return }
+            let ns = textView.text as NSString? ?? ""
+            let loc = min(textView.selectedRange.location, ns.length)
+            keyboard.updateSuggestions(beforeCaret: ns.substring(to: loc))
         }
 
         @objc func handleSelectNotification() {
@@ -210,6 +218,7 @@ struct CodeEditorView: UIViewRepresentable {
             parent.text = newText
             let selected = textView.selectedRange
             applyAttributedText(to: textView, string: newText, forceCursor: selected)
+            refreshKeyboardSuggestions(from: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -219,6 +228,7 @@ struct CodeEditorView: UIViewRepresentable {
                 // Tap / double-tap must only move the caret unless ⋯ Select mode is on (DESIGN §3.6).
                 let caret = editor.selectedRange.location + editor.selectedRange.length
                 editor.selectedRange = NSRange(location: caret, length: 0)
+                refreshKeyboardSuggestions(from: textView)
                 return
             }
 
@@ -226,6 +236,7 @@ struct CodeEditorView: UIViewRepresentable {
             if !editor.isDraggingCaret {
                 editor.scrollHorizontallyIfLineChanged()
             }
+            refreshKeyboardSuggestions(from: textView)
         }
 
         func textView(
