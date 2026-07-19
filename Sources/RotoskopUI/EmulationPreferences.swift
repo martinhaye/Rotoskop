@@ -38,4 +38,10 @@ enum EmulationPreferences {
     static func formatMHz(_ value: Double) -> String {
         String(format: "%.2f MHz", value)
     }
+
+    /// Effective clock readout while running: nearest 0.1 MHz.
+    static func formatEffectiveMHz(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        return String(format: "%.1f MHz", rounded)
+    }
 }

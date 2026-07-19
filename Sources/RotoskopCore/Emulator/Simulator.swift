@@ -8,6 +8,7 @@ public final class Simulator {
 
     private var keyboard: Keyboard?
     private var hardDrive: HardDrive?
+    public private(set) var idleDetector: IdleDetector?
 
     public init(config: SimulatorConfig) {
         self.config = config
@@ -21,6 +22,11 @@ public final class Simulator {
     }
 
     public func load() throws {
+        idleDetector?.setSuppressed(true)
+        defer {
+            idleDetector?.setSuppressed(false)
+            idleDetector?.wake()
+        }
         // Clear vector tracking, then load (writes to $FFFE/$FFFF count as set), then reset regs.
         memory.markVectorsUnset()
         for binary in config.binaries {
@@ -40,11 +46,20 @@ public final class Simulator {
     }
 
     /// Interactive keyboard for app mode (call after `setupKeyboard` or alone).
+    /// Enables experimental `$C000` idle detection for power save.
     public func ensureInteractiveKeyboard() -> Keyboard {
         if let keyboard { return keyboard }
         let kbd = Keyboard(inputStrings: [])
         keyboard = kbd
-        memory.addReadHook(at: Keyboard.kbdData) { [unowned kbd] in kbd.readKbd() }
+        let idle = IdleDetector()
+        idleDetector = idle
+        memory.onChangingNonStackWrite = { [weak idle] in idle?.noteChangingWrite() }
+        memory.isEmulationIdle = { [weak idle] in idle?.isIdle ?? false }
+        memory.addReadHook(at: Keyboard.kbdData) { [unowned kbd, unowned idle] in
+            let value = kbd.readKbd()
+            idle.noteKbdPoll(keyPending: (value & 0x80) != 0)
+            return value
+        }
         memory.addReadHook(at: Keyboard.kbdStrobe) { [unowned kbd] in kbd.clearStrobe() }
         memory.addWriteHook(at: Keyboard.kbdStrobe) { [unowned kbd] _ in _ = kbd.clearStrobe() }
         return kbd
@@ -53,7 +68,9 @@ public final class Simulator {
     public func setupHardDrive(imagePath: String) throws {
         let hd = try HardDrive(imagePath: imagePath)
         hardDrive = hd
+        idleDetector?.setSuppressed(true)
         memory.loadBinary(hd.romBytes(), at: HardDrive.romBase)
+        idleDetector?.setSuppressed(false)
         cpu.addPCHook(at: HardDrive.entryPoint) { [unowned self] in
             self.handleBlockCall()
         }
@@ -62,7 +79,9 @@ public final class Simulator {
     public func setupHardDrive(imageData: Data) {
         let hd = HardDrive(imageData: imageData)
         hardDrive = hd
+        idleDetector?.setSuppressed(true)
         memory.loadBinary(hd.romBytes(), at: HardDrive.romBase)
+        idleDetector?.setSuppressed(false)
         cpu.addPCHook(at: HardDrive.entryPoint) { [unowned self] in
             self.handleBlockCall()
         }

@@ -774,6 +774,7 @@ public final class CPU {
         clearSoftLimit()
         let limit = instructionCount + maxInstructions
         while instructionCount < limit {
+            if memory.isEmulationIdle?() == true { break }
             if !step() { break }
         }
         return finishSoftLimit(hit: !halted && instructionCount >= limit)
@@ -786,6 +787,7 @@ public final class CPU {
         clearSoftLimit()
         let limit = cycleCount + max(1, maxCycles)
         while cycleCount < limit {
+            if memory.isEmulationIdle?() == true { break }
             if !step() { break }
         }
         return finishSoftLimit(hit: !halted && cycleCount >= limit)

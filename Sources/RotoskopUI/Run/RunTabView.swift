@@ -32,11 +32,6 @@ struct RunTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if workspace.isRunning, let key = workspace.lastInjectedKey {
-                    Text("key \(key)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

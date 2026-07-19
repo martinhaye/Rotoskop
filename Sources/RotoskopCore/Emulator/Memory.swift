@@ -9,6 +9,12 @@ public final class Memory {
     private var readHooks: [UInt16: () -> UInt8] = [:]
     private var writeHooks: [UInt16: (UInt8) -> Void] = [:]
 
+    /// Invoked when a non-stack RAM write actually changes a stored byte.
+    public var onChangingNonStackWrite: (() -> Void)?
+
+    /// When true, `CPU.run` soft-pauses (idle keyboard-wait power save).
+    public var isEmulationIdle: (() -> Bool)?
+
     /// True once `$FFFE`/`$FFFF` have been written since the last `markVectorsUnset()`.
     /// Used for unhandled-BRK detection (fill value `$FF` does not count as set).
     public private(set) var irqVectorWritten = false
@@ -43,8 +49,15 @@ public final class Memory {
         }
         if let hook = writeHooks[addr] {
             hook(value)
-        } else {
-            bytes[Int(addr)] = value
+            return
+        }
+        let idx = Int(addr)
+        let old = bytes[idx]
+        guard old != value else { return }
+        bytes[idx] = value
+        // Idle detector: skip 6502 stack page ($0100–$01FF).
+        if (addr & 0xFF00) != 0x0100 {
+            onChangingNonStackWrite?()
         }
     }
 

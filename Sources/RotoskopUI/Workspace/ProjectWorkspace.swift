@@ -45,12 +45,10 @@ final class ProjectWorkspace: ObservableObject {
 
     @Published var screenText = ""
     @Published var screenDisplay = AttributedString()
-    @Published var runStatus = "Idle"
+    @Published var runStatus = "Ready"
     @Published var isRunning = false
     @Published var stopReasonText: String?
     @Published var registerDump: String?
-    /// Last key byte injected (debug aid for interactive keyboard).
-    @Published var lastInjectedKey: String?
 
     private var autosaveTask: Task<Void, Never>?
     private let autosaveDelayNanoseconds: UInt64 = 500_000_000
@@ -67,13 +65,21 @@ final class ProjectWorkspace: ObservableObject {
         private var keyboard: Keyboard?
         private var control: RunControl?
         private weak var cpu: CPU?
+        private weak var idleDetector: IdleDetector?
         private var generation = 0
 
-        func install(keyboard: Keyboard, control: RunControl, cpu: CPU, generation: Int) {
+        func install(
+            keyboard: Keyboard,
+            control: RunControl,
+            cpu: CPU,
+            idleDetector: IdleDetector?,
+            generation: Int
+        ) {
             lock.lock()
             self.keyboard = keyboard
             self.control = control
             self.cpu = cpu
+            self.idleDetector = idleDetector
             self.generation = generation
             lock.unlock()
         }
@@ -87,6 +93,7 @@ final class ProjectWorkspace: ObservableObject {
             keyboard = nil
             control = nil
             cpu = nil
+            idleDetector = nil
             lock.unlock()
         }
 
@@ -94,7 +101,9 @@ final class ProjectWorkspace: ObservableObject {
             lock.lock()
             control?.stop()
             let cpu = self.cpu
+            let idle = self.idleDetector
             lock.unlock()
+            idle?.wake()
             cpu?.requestStop()
         }
 
@@ -116,8 +125,10 @@ final class ProjectWorkspace: ObservableObject {
         func injectKey(_ key: UInt8) {
             lock.lock()
             let keyboard = self.keyboard
+            let idle = self.idleDetector
             lock.unlock()
             keyboard?.injectKey(key)
+            idle?.wake()
         }
     }
 
@@ -379,7 +390,7 @@ final class ProjectWorkspace: ObservableObject {
         if active {
             let mhz = EmulationPreferences.clockMHz
             sessionBox.setPaused(false, mhz: mhz)
-            runStatus = EmulationPreferences.formatMHz(mhz)
+            runStatus = EmulationPreferences.formatEffectiveMHz(mhz)
         } else {
             sessionBox.setPaused(true)
             runStatus = "Paused"
@@ -482,10 +493,10 @@ final class ProjectWorkspace: ObservableObject {
         sessionBox.stop()
         sessionBox.clear()
         isRunning = false
-        lastInjectedKey = nil
         if runStatus == "Running…"
             || runStatus == "Building first…"
             || runStatus == "Paused"
+            || runStatus == "Idle"
             || runStatus.hasSuffix("MHz")
         {
             runStatus = "Stopped"
@@ -499,8 +510,6 @@ final class ProjectWorkspace: ObservableObject {
             if key == 0x0A { key = 0x0D }
             if key == 0x7F { key = 0x08 }
             sessionBox.injectKey(key)
-            // Show latched $C000 view (hi-bit set = key ready), not the raw inject byte.
-            lastInjectedKey = String(format: "$%02X", key | 0x80)
         }
     }
 
@@ -515,10 +524,9 @@ final class ProjectWorkspace: ObservableObject {
         isRunning = true
         stopReasonText = nil
         registerDump = nil
-        lastInjectedKey = nil
         screenText = ""
         screenDisplay = AttributedString()
-        runStatus = runTabActive ? EmulationPreferences.formatMHz(mhz) : "Paused"
+        runStatus = runTabActive ? EmulationPreferences.formatEffectiveMHz(mhz) : "Paused"
 
         let batchSeconds = 0.005
         let budgetNanos = UInt64(batchSeconds * 1_000_000_000.0)
@@ -533,7 +541,14 @@ final class ProjectWorkspace: ObservableObject {
                 }
                 let kbd = sim.ensureInteractiveKeyboard()
                 try sim.load()
-                sessionBox.install(keyboard: kbd, control: control, cpu: sim.cpu, generation: generation)
+                let idle = sim.idleDetector
+                sessionBox.install(
+                    keyboard: kbd,
+                    control: control,
+                    cpu: sim.cpu,
+                    idleDetector: idle,
+                    generation: generation
+                )
 
                 var finalReason: StopReason = .instructionLimit
                 var nextDeadline = DispatchTime.now()
@@ -541,6 +556,8 @@ final class ProjectWorkspace: ObservableObject {
                 var cyclesAtRateWindowStart = sim.cycleCount
                 var batchesSinceUI = uiEveryBatches // force first paint promptly
                 var wasPaused = control.isPaused
+                var lastMHzStatusUpdate = DispatchTime.now()
+                let mhzStatusIntervalNanos: UInt64 = 500_000_000 // 2 Hz
 
                 while !control.isStopped {
                     while control.isPaused && !control.isStopped {
@@ -549,19 +566,50 @@ final class ProjectWorkspace: ObservableObject {
                     }
                     if control.isStopped { break }
 
-                    // After a pause, restart the wall-clock schedule so catch-up
-                    // doesn't try to "owe" cycles for time spent paused.
+                    // Host-side wait while the guest is in keyboard-idle power save.
+                    if let idle, idle.isIdle {
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, self.runGeneration == generation, !control.isStopped else { return }
+                            if !control.isPaused {
+                                self.runStatus = "Idle"
+                            }
+                        }
+                        while idle.isIdle && !control.isStopped && !control.isPaused {
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
+                        wasPaused = true // resync deadlines after idle or tab-pause
+                        continue
+                    }
+
+                    // After a pause/idle, restart the wall-clock schedule so catch-up
+                    // doesn't try to "owe" cycles for time spent waiting.
                     if wasPaused {
                         wasPaused = false
                         nextDeadline = DispatchTime.now()
                         rateWindowStart = nextDeadline
                         cyclesAtRateWindowStart = sim.cycleCount
+                        lastMHzStatusUpdate = DispatchTime.now()
                     }
 
                     let targetMHz = control.currentMHz()
                     let cyclesTarget = max(1, Int((targetMHz * 1_000_000.0 * batchSeconds).rounded()))
 
                     let reason = sim.run(maxCycles: cyclesTarget, trace: false)
+
+                    // Entered idle mid-batch: park without burning the rest of the slot.
+                    if let idle, idle.isIdle {
+                        let cells = sim.dumpScreenCells()
+                        let screen = TextScreen.dumpCellsToString(cells)
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, self.runGeneration == generation, !control.isStopped else { return }
+                            self.screenText = screen
+                            self.screenDisplay = Self.attributedScreen(cells)
+                            if !control.isPaused {
+                                self.runStatus = "Idle"
+                            }
+                        }
+                        continue
+                    }
 
                     nextDeadline = DispatchTime(
                         uptimeNanoseconds: nextDeadline.uptimeNanoseconds &+ budgetNanos
@@ -589,6 +637,12 @@ final class ProjectWorkspace: ObservableObject {
                         effectiveMHz = targetMHz
                     }
 
+                    let mhzDue = now.uptimeNanoseconds &- lastMHzStatusUpdate.uptimeNanoseconds
+                        >= mhzStatusIntervalNanos
+                    if mhzDue {
+                        lastMHzStatusUpdate = now
+                    }
+
                     batchesSinceUI += 1
                     let paintUI = batchesSinceUI >= uiEveryBatches || reason != .instructionLimit
                     let cells: [[TextScreen.Cell]]?
@@ -603,14 +657,16 @@ final class ProjectWorkspace: ObservableObject {
                         screen = nil
                     }
 
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, self.runGeneration == generation, !control.isStopped else { return }
-                        if let cells, let screen {
-                            self.screenText = screen
-                            self.screenDisplay = Self.attributedScreen(cells)
-                        }
-                        if !control.isPaused {
-                            self.runStatus = EmulationPreferences.formatMHz(effectiveMHz)
+                    if paintUI || mhzDue {
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, self.runGeneration == generation, !control.isStopped else { return }
+                            if let cells, let screen {
+                                self.screenText = screen
+                                self.screenDisplay = Self.attributedScreen(cells)
+                            }
+                            if mhzDue, !control.isPaused {
+                                self.runStatus = EmulationPreferences.formatEffectiveMHz(effectiveMHz)
+                            }
                         }
                     }
 
@@ -635,7 +691,6 @@ final class ProjectWorkspace: ObservableObject {
                     self.stopReasonText = Self.describe(finalReason)
                     self.runStatus = Self.describe(finalReason)
                     self.isRunning = false
-                    self.lastInjectedKey = nil
                 }
             } catch {
                 sessionBox.clear(generation: generation)
