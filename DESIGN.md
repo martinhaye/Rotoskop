@@ -72,34 +72,32 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 
 ### 3. Code editor
 
-**Agreed** for v1. Plain-text code editor: proportional font, tab-stop layout for assembly, autosave always, and almost no iOS text-widget specialness. Implementation may be a custom text view or a fully disarmed TextKit stack—whichever gets the gesture model right with less pain.
+**Agreed** for v1. Plain-text code editor: monospace coding font, standard 8-column tab stops, autosave always, and almost no iOS text-widget specialness. Implementation may be a custom text view or a fully disarmed TextKit stack—whichever gets the gesture model right with less pain.
 
 #### 3.1 File kinds
 
 | Kind | Extensions (v1) | Tab stops | Space / Enter | Highlighting |
 |------|-----------------|-----------|---------------|--------------|
-| Assembly | `.s`, `.i` | Fixed semantic columns (tunable M-widths) | §3.3 | Simple asm |
-| Non-assembly | everything else | Fixed interval, every **4 M-widths** (tabs still display on stops if present) | Space = ` `; Enter auto-indents (§3.3) | None |
+| Assembly | `.s`, `.i` | Every **8** character widths | §3.3 | Simple asm |
+| Non-assembly | everything else | Every **8** character widths | §3.3 | None |
 
 #### 3.2 Typography & layout
 
-- **Proportional font** (author preference). Exact face TBD; prefer clear `O`/`0`, `l`/`1`.
+- **Monospace coding font** (system monospaced at 16pt).
 - **No soft wrap.** v1: **truncate** on the right (horizontal scrolling may come later).
-- Tab stops are **fixed** (not elastic); assembly column positions tunable for feel.
+- Tab stops are **fixed** every 8 character widths for all file kinds.
 
 #### 3.3 Tabs, spaces, Enter
 
-**Assembly — columns** are only “text after N tabs.” No smart classification; tab count chooses the column.
+Tabs display on the standard 8-column stops. Tab count chooses column; no smart field classification.
 
-**Assembly — Space key:**
+**Space key (all file kinds):**
 - Inside quotes → ` `
-- Immediately after a comma → ` `
-- In a comment body (cursor after `;` on that line) → ` `
-- Otherwise → `\t`
+- In a comment body → ` ` (assembly: after `;`; plain: after `#`)
+- Otherwise, if the character immediately before the caret is a space → convert that space to `\t` (double-space → tab)
+- Otherwise → ` `
 
-**Assembly — Tab key:** always `\t`.
-
-**Non-assembly — Space:** always ` ` (no Space→tab). YAML-safe.
+**Tab key:** always `\t` (hardware / paste).
 
 **Non-assembly — Enter:** insert newline, then copy the **leading whitespace** (spaces/tabs) of the previous line (auto-indent); backspace clears it as usual.
 
@@ -142,8 +140,6 @@ Scroll vs select: flick/far-drag still **scrolls**; selection persists while scr
 
 - Near-cursor / flick thresholds (tune in UI).
 - Horizontal scrolling; trackpad/pointer parity; Redo if not free with Undo.
-
-Assembly tab stops (current): **4 / 12 / 22 / 32** M-widths (opcode ≈ 10% of phone width at 16pt). Retune in `AssemblyHighlighter` if needed.
 
 ### 4. Assembler (ca65 subset)
 

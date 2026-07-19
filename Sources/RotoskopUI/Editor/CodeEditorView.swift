@@ -3,7 +3,7 @@ import SwiftUI
 #if os(iOS)
 import UIKit
 
-/// Disarmed UITextView editor with assembly Space/Tab/Enter rules and simple highlighting (DESIGN §3).
+/// Disarmed UITextView editor with Space/Tab/Enter rules and simple highlighting (DESIGN §3).
 struct CodeEditorView: UIViewRepresentable {
     @Binding var text: String
     var fileKind: EditorInputRules.FileKind
@@ -201,12 +201,19 @@ struct CodeEditorView: UIViewRepresentable {
 
             if text == " " {
                 let lineInfo = lineContext(in: textView, utf16Offset: range.location)
-                let insertion = EditorInputRules.spaceInsertion(
+                let edit = EditorInputRules.spaceEdit(
                     kind: parent.fileKind,
                     line: lineInfo.line,
-                    cursorUTF16Offset: lineInfo.offsetInLine
+                    cursorUTF16Offset: lineInfo.offsetInLine,
+                    replacingSelection: range.length > 0
                 )
-                replace(in: textView, range: range, with: insertion)
+                switch edit {
+                case .insert(let insertion):
+                    replace(in: textView, range: range, with: insertion)
+                case .convertPrecedingSpaceToTab:
+                    let expanded = NSRange(location: range.location - 1, length: range.length + 1)
+                    replace(in: textView, range: expanded, with: "\t")
+                }
                 return false
             }
 
@@ -233,12 +240,13 @@ struct CodeEditorView: UIViewRepresentable {
             isApplyingHighlight = true
             defer { isApplyingHighlight = false }
 
-            let font = UIFont.systemFont(ofSize: 16, weight: .regular)
+            let font = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
             let attributed = AssemblyHighlighter.attributedString(
                 for: string,
                 font: font,
                 isAssembly: parent.fileKind == .assembly
             )
+            textView.font = font
             textView.attributedText = attributed
             if let forceCursor {
                 let maxLoc = (textView.text as NSString?)?.length ?? 0
@@ -662,7 +670,7 @@ struct CodeEditorView: View {
 
     var body: some View {
         TextEditor(text: $text)
-            .font(.body)
+            .font(.system(.body, design: .monospaced))
             .onChange(of: revealLine) { _, line in
                 if line != nil { onRevealConsumed?() }
             }

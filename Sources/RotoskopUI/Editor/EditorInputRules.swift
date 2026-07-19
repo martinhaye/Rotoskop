@@ -12,14 +12,34 @@ public enum EditorInputRules {
         }
     }
 
-    /// What to insert when the user presses Space.
-    public static func spaceInsertion(kind: FileKind, line: String, cursorUTF16Offset: Int) -> String {
-        switch kind {
-        case .plain:
-            return " "
-        case .assembly:
-            return assemblySpaceInsertion(line: line, cursorUTF16Offset: cursorUTF16Offset)
+    /// Result of pressing Space (may convert a prior space into a tab).
+    public enum SpaceEdit: Equatable, Sendable {
+        /// Insert `text` at the caret (normally a single space).
+        case insert(String)
+        /// Replace the space immediately before the caret with `\t`.
+        case convertPrecedingSpaceToTab
+    }
+
+    /// What to do when the user presses Space.
+    ///
+    /// Double-space → tab (unified for all file kinds), except inside quotes or a comment body.
+    public static func spaceEdit(
+        kind: FileKind,
+        line: String,
+        cursorUTF16Offset: Int,
+        replacingSelection: Bool = false
+    ) -> SpaceEdit {
+        let offset = clampUTF16(cursorUTF16Offset, in: line)
+        if isInsideQuotes(line: line, cursorUTF16Offset: offset) {
+            return .insert(" ")
         }
+        if isInCommentBody(kind: kind, line: line, cursorUTF16Offset: offset) {
+            return .insert(" ")
+        }
+        if !replacingSelection, isImmediatelyAfterSpace(line: line, cursorUTF16Offset: offset) {
+            return .convertPrecedingSpaceToTab
+        }
+        return .insert(" ")
     }
 
     /// What to insert when the user presses Tab (always a tab character).
@@ -36,21 +56,7 @@ public enum EditorInputRules {
         }
     }
 
-    // MARK: - Assembly Space → tab
-
-    private static func assemblySpaceInsertion(line: String, cursorUTF16Offset: Int) -> String {
-        let offset = clampUTF16(cursorUTF16Offset, in: line)
-        if isInsideQuotes(line: line, cursorUTF16Offset: offset) {
-            return " "
-        }
-        if isImmediatelyAfterComma(line: line, cursorUTF16Offset: offset) {
-            return " "
-        }
-        if isInCommentBody(line: line, cursorUTF16Offset: offset) {
-            return " "
-        }
-        return "\t"
-    }
+    // MARK: - Context helpers
 
     /// Cursor is inside a double-quoted string on this line (quotes not counted as inside).
     public static func isInsideQuotes(line: String, cursorUTF16Offset: Int) -> Bool {
@@ -69,15 +75,17 @@ public enum EditorInputRules {
         return inside
     }
 
-    public static func isImmediatelyAfterComma(line: String, cursorUTF16Offset: Int) -> Bool {
+    public static func isImmediatelyAfterSpace(line: String, cursorUTF16Offset: Int) -> Bool {
         let offset = clampUTF16(cursorUTF16Offset, in: line)
         guard offset > 0 else { return false }
         let idx = line.utf16.index(line.utf16.startIndex, offsetBy: offset - 1)
-        return line.utf16[idx] == 0x2C // ,
+        return line.utf16[idx] == 0x20 // space
     }
 
-    /// True when a `;` appears before the cursor on this line, outside of quotes.
-    public static func isInCommentBody(line: String, cursorUTF16Offset: Int) -> Bool {
+    /// True when a comment starter appears before the cursor on this line, outside of quotes.
+    /// Assembly: `;`. Plain: `#` (YAML-safe comments).
+    public static func isInCommentBody(kind: FileKind, line: String, cursorUTF16Offset: Int) -> Bool {
+        let starter: UInt16 = kind == .assembly ? 0x3B /* ; */ : 0x23 /* # */
         let offset = clampUTF16(cursorUTF16Offset, in: line)
         var insideQuotes = false
         var i = line.utf16.startIndex
@@ -86,7 +94,7 @@ public enum EditorInputRules {
             let unit = line.utf16[i]
             if unit == 0x22 { // "
                 insideQuotes.toggle()
-            } else if unit == 0x3B, !insideQuotes { // ;
+            } else if unit == starter, !insideQuotes {
                 return true
             }
             i = line.utf16.index(after: i)

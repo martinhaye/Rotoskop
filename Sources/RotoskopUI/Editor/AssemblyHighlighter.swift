@@ -150,19 +150,10 @@ public enum AssemblyHighlighter {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byClipping
-        let mWidth = ("M" as NSString).size(withAttributes: [.font: font]).width
-        if isAssembly {
-            // Fixed M-width columns (not %-of-screen): label / opcode / operand / comment.
-            // Opcode at 4M ≈ 10% of a phone-width editor at 16pt.
-            let columns: [CGFloat] = [0, 4, 12, 22, 32]
-            paragraph.tabStops = columns.map {
-                NSTextTab(textAlignment: .left, location: $0 * mWidth, options: [:])
-            }
-            paragraph.defaultTabInterval = 4 * mWidth
-        } else {
-            paragraph.defaultTabInterval = 4 * mWidth
-            paragraph.tabStops = []
-        }
+        // Standard tab stops every 8 character widths (monospace coding font).
+        let charWidth = (" " as NSString).size(withAttributes: [.font: font]).width
+        paragraph.tabStops = []
+        paragraph.defaultTabInterval = 8 * charWidth
 
         let base: [NSAttributedString.Key: Any] = [
             .font: font,
