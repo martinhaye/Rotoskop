@@ -45,15 +45,10 @@ public enum EditorInputRules {
     /// What to insert when the user presses Tab (always a tab character).
     public static func tabInsertion() -> String { "\t" }
 
-    /// Text to insert for Enter, including auto-indent for non-assembly.
-    public static func enterInsertion(kind: FileKind, lineBeforeCursor: String) -> String {
-        switch kind {
-        case .assembly:
-            return "\n"
-        case .plain:
-            let indent = String(lineBeforeCursor.prefix(while: { $0 == " " || $0 == "\t" }))
-            return "\n" + indent
-        }
+    /// Text to insert for Enter: newline plus the leading whitespace of the current line.
+    public static func enterInsertion(lineBeforeCursor: String) -> String {
+        let indent = leadingWhitespace(of: lineBeforeCursor)
+        return "\n" + indent
     }
 
     // MARK: - Context helpers

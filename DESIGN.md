@@ -83,7 +83,7 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 
 #### 3.2 Typography & layout
 
-- **Monospace coding font** (system monospaced at 16pt).
+- **Monospace coding font** (system monospaced at 16pt, horizontally condensed ~15% so more columns fit without shrinking line height).
 - **No soft wrap.** v1: **truncate** on the right (horizontal scrolling may come later).
 - Tab stops are **fixed** every 8 character widths for all file kinds.
 
@@ -99,9 +99,7 @@ Tabs display on the standard 8-column stops. Tab count chooses column; no smart 
 
 **Tab key:** always `\t` (hardware / paste).
 
-**Non-assembly — Enter:** insert newline, then copy the **leading whitespace** (spaces/tabs) of the previous line (auto-indent); backspace clears it as usual.
-
-**Assembly — Enter:** plain newline, no auto-indent in v1.
+**Enter (all file kinds):** insert newline, then copy the **leading whitespace** (spaces/tabs) of the current line (auto-indent); backspace clears it as usual.
 
 #### 3.4 Syntax highlighting
 

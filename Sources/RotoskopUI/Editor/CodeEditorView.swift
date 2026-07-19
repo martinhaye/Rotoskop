@@ -226,7 +226,6 @@ struct CodeEditorView: UIViewRepresentable {
                 let lineInfo = lineContext(in: textView, utf16Offset: range.location)
                 let prefix = utf16Prefix(lineInfo.line, count: lineInfo.offsetInLine)
                 let insertion = EditorInputRules.enterInsertion(
-                    kind: parent.fileKind,
                     lineBeforeCursor: prefix
                 )
                 replace(in: textView, range: range, with: insertion)
@@ -240,7 +239,7 @@ struct CodeEditorView: UIViewRepresentable {
             isApplyingHighlight = true
             defer { isApplyingHighlight = false }
 
-            let font = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+            let font = EditorCodingFont.make()
             let attributed = AssemblyHighlighter.attributedString(
                 for: string,
                 font: font,

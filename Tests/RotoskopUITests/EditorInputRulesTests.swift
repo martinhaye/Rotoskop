@@ -74,10 +74,12 @@ struct EditorInputRulesTests {
         )
     }
 
-    @Test func enterAutoIndentPlainOnly() {
-        #expect(EditorInputRules.enterInsertion(kind: .assembly, lineBeforeCursor: "\tlda") == "\n")
-        #expect(EditorInputRules.enterInsertion(kind: .plain, lineBeforeCursor: "  key: x") == "\n  ")
-        #expect(EditorInputRules.enterInsertion(kind: .plain, lineBeforeCursor: "\t- item") == "\n\t")
+    @Test func enterAutoIndentCopiesLeadingWhitespace() {
+        #expect(EditorInputRules.enterInsertion(lineBeforeCursor: "\tlda") == "\n\t")
+        #expect(EditorInputRules.enterInsertion(lineBeforeCursor: "\t\tsta $00") == "\n\t\t")
+        #expect(EditorInputRules.enterInsertion(lineBeforeCursor: "label:") == "\n")
+        #expect(EditorInputRules.enterInsertion(lineBeforeCursor: "  key: x") == "\n  ")
+        #expect(EditorInputRules.enterInsertion(lineBeforeCursor: "\t- item") == "\n\t")
     }
 
     @Test func highlighterFindsCommentOpcodeDirective() {
