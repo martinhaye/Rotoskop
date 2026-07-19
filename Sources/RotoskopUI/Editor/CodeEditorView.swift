@@ -4,12 +4,15 @@ import SwiftUI
 import UIKit
 
 /// Disarmed UITextView editor with Space/Tab/Enter rules and simple highlighting (DESIGN §3).
+///
+/// Horizontal scroll is owned by an outer `UIScrollView`; the text view is sized to the
+/// full document and does not scroll itself (UITextView H-scroll reliably blanks glyphs).
 struct CodeEditorView: UIViewRepresentable {
     @Binding var text: String
     var fileKind: EditorInputRules.FileKind
     var filePath: String?
-    var restoredScrollY: CGFloat
-    var onScrollYChange: ((CGFloat) -> Void)?
+    var restoredScrollOffset: CGPoint
+    var onScrollOffsetChange: ((CGPoint) -> Void)?
     var revealLine: Int?
     var revealColumn: Int?
     var onRevealConsumed: (() -> Void)?
@@ -18,20 +21,22 @@ struct CodeEditorView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    func makeUIView(context: Context) -> EditorTextView {
-        let view = EditorTextView()
+    func makeUIView(context: Context) -> EditorScrollContainer {
+        let container = EditorScrollContainer()
+        let view = container.editor
         view.delegate = context.coordinator
+        container.delegate = context.coordinator
         view.backgroundColor = .systemBackground
+        container.backgroundColor = .systemBackground
         view.textContainer.lineFragmentPadding = 8
         view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
-        // Critical for SwiftUI: don't hug content height or the view grows with the
-        // document and UITextView never scrolls.
-        view.setContentHuggingPriority(.defaultLow, for: .vertical)
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        view.isScrollEnabled = true
-        view.alwaysBounceVertical = true
+        view.textContainer.widthTracksTextView = false
+        view.textContainer.heightTracksTextView = false
+        // Critical for SwiftUI: don't hug content or the host grows with the document.
+        container.setContentHuggingPriority(.defaultLow, for: .vertical)
+        container.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        container.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.keyboardDismissMode = .interactive
         view.allowsEditingTextAttributes = false
         view.smartDashesType = .no
@@ -49,7 +54,7 @@ struct CodeEditorView: UIViewRepresentable {
         view.undoManager?.removeAllActions()
         context.coordinator.applyAttributedText(to: view, string: text, forceCursor: nil)
         context.coordinator.trackedPath = filePath
-        context.coordinator.restoreScroll(restoredScrollY, in: view)
+        context.coordinator.restoreScroll(restoredScrollOffset, in: container)
         NotificationCenter.default.addObserver(
             context.coordinator,
             selector: #selector(Coordinator.handleSelectNotification),
@@ -63,44 +68,47 @@ struct CodeEditorView: UIViewRepresentable {
             object: nil
         )
         context.coordinator.editor = view
-        return view
+        context.coordinator.scrollContainer = container
+        return container
     }
 
-    func updateUIView(_ uiView: EditorTextView, context: Context) {
+    func updateUIView(_ uiView: EditorScrollContainer, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.editor = uiView
-        uiView.fileKind = fileKind
+        context.coordinator.editor = uiView.editor
+        context.coordinator.scrollContainer = uiView
+        uiView.editor.fileKind = fileKind
 
         let pathChanged = context.coordinator.trackedPath != filePath
         if pathChanged {
             context.coordinator.trackedPath = filePath
-            context.coordinator.isApplyingHighlight = true
-            context.coordinator.applyAttributedText(to: uiView, string: text, forceCursor: NSRange(location: 0, length: 0))
-            context.coordinator.isApplyingHighlight = false
-            context.coordinator.restoreScroll(restoredScrollY, in: uiView)
-        } else if uiView.markedTextRange == nil, uiView.text != text {
-            let selected = uiView.selectedRange
-            context.coordinator.applyAttributedText(to: uiView, string: text, forceCursor: selected)
+            uiView.editor.resetTrackedLine()
+            context.coordinator.applyAttributedText(to: uiView.editor, string: text, forceCursor: NSRange(location: 0, length: 0))
+            context.coordinator.restoreScroll(restoredScrollOffset, in: uiView)
+        } else if uiView.editor.markedTextRange == nil, uiView.editor.text != text {
+            let selected = uiView.editor.selectedRange
+            context.coordinator.applyAttributedText(to: uiView.editor, string: text, forceCursor: selected)
         }
 
         if let line = revealLine {
-            context.coordinator.reveal(line: line, column: revealColumn ?? 1, in: uiView)
+            context.coordinator.reveal(line: line, column: revealColumn ?? 1, in: uiView.editor)
             DispatchQueue.main.async {
                 onRevealConsumed?()
             }
         }
     }
 
-    static func dismantleUIView(_ uiView: EditorTextView, coordinator: Coordinator) {
-        coordinator.parent.onScrollYChange?(uiView.contentOffset.y)
-        uiView.teardownOverlays()
+    static func dismantleUIView(_ uiView: EditorScrollContainer, coordinator: Coordinator) {
+        coordinator.parent.onScrollOffsetChange?(uiView.contentOffset)
+        uiView.editor.teardownOverlays()
         NotificationCenter.default.removeObserver(coordinator)
         coordinator.editor = nil
+        coordinator.scrollContainer = nil
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIScrollViewDelegate {
         var parent: CodeEditorView
         weak var editor: EditorTextView?
+        weak var scrollContainer: EditorScrollContainer?
         var trackedPath: String?
         var isApplyingHighlight = false
         private var suppressScrollCallback = false
@@ -118,24 +126,34 @@ struct CodeEditorView: UIViewRepresentable {
             editor?.enterSelectMode()
         }
 
-        func restoreScroll(_ y: CGFloat, in textView: UITextView) {
+        func restoreScroll(_ offset: CGPoint, in container: EditorScrollContainer) {
             suppressScrollCallback = true
-            textView.layoutIfNeeded()
-            let maxY = max(0, textView.contentSize.height - textView.bounds.height)
-            let target = min(max(0, y), maxY)
-            textView.setContentOffset(CGPoint(x: 0, y: target), animated: false)
-            // Layout may still be settling after attributed text; nudge once more.
-            DispatchQueue.main.async { [weak self, weak textView] in
-                guard let self, let textView else { return }
-                let maxY = max(0, textView.contentSize.height - textView.bounds.height)
-                textView.setContentOffset(CGPoint(x: 0, y: min(max(0, y), maxY)), animated: false)
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            let clamped = Self.clampedContentOffset(offset, in: container)
+            container.setContentOffset(clamped, animated: false)
+            DispatchQueue.main.async { [weak self, weak container] in
+                guard let self, let container else { return }
+                container.setNeedsLayout()
+                container.layoutIfNeeded()
+                container.setContentOffset(Self.clampedContentOffset(offset, in: container), animated: false)
+                container.editor.syncTrackedLineWithoutScrolling()
                 self.suppressScrollCallback = false
             }
         }
 
+        private static func clampedContentOffset(_ offset: CGPoint, in scrollView: UIScrollView) -> CGPoint {
+            let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+            let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+            return CGPoint(
+                x: min(max(0, offset.x), maxX),
+                y: min(max(0, offset.y), maxY)
+            )
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard !suppressScrollCallback else { return }
-            parent.onScrollYChange?(scrollView.contentOffset.y)
+            parent.onScrollOffsetChange?(scrollView.contentOffset)
         }
 
         func reveal(line: Int, column: Int, in textView: UITextView) {
@@ -157,7 +175,9 @@ struct CodeEditorView: UIViewRepresentable {
             let caret = min(index + col - 1, lineEnd)
             let range = NSRange(location: caret, length: 0)
             textView.selectedRange = range
-            textView.scrollRangeToVisible(NSRange(location: index, length: max(1, lineEnd - index)))
+            if let editor = textView as? EditorTextView {
+                editor.scrollHorizontallyPreferringLeadingEdge(forceLineTracking: true)
+            }
             textView.becomeFirstResponder()
         }
 
@@ -170,15 +190,19 @@ struct CodeEditorView: UIViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            guard !isApplyingHighlight,
-                  let editor = textView as? EditorTextView,
-                  !editor.selectMode,
-                  !editor.isDraggingCaret,
-                  editor.selectedRange.length > 0
-            else { return }
-            // Tap / double-tap must only move the caret unless ⋯ Select mode is on (DESIGN §3.6).
-            let caret = editor.selectedRange.location + editor.selectedRange.length
-            editor.selectedRange = NSRange(location: caret, length: 0)
+            guard !isApplyingHighlight, let editor = textView as? EditorTextView else { return }
+
+            if !editor.selectMode, !editor.isDraggingCaret, editor.selectedRange.length > 0 {
+                // Tap / double-tap must only move the caret unless ⋯ Select mode is on (DESIGN §3.6).
+                let caret = editor.selectedRange.location + editor.selectedRange.length
+                editor.selectedRange = NSRange(location: caret, length: 0)
+                return
+            }
+
+            // Prefer scrolling X back toward 0 when the caret changes lines (skip during drag).
+            if !editor.isDraggingCaret {
+                editor.scrollHorizontallyIfLineChanged()
+            }
         }
 
         func textView(
@@ -237,8 +261,6 @@ struct CodeEditorView: UIViewRepresentable {
 
         func applyAttributedText(to textView: UITextView, string: String, forceCursor: NSRange?) {
             isApplyingHighlight = true
-            defer { isApplyingHighlight = false }
-
             let font = EditorCodingFont.make()
             let attributed = AssemblyHighlighter.attributedString(
                 for: string,
@@ -247,11 +269,19 @@ struct CodeEditorView: UIViewRepresentable {
             )
             textView.font = font
             textView.attributedText = attributed
+            if let editor = textView as? EditorTextView {
+                editor.relayoutContentSize()
+            }
             if let forceCursor {
                 let maxLoc = (textView.text as NSString?)?.length ?? 0
                 let loc = min(forceCursor.location, maxLoc)
                 let len = min(forceCursor.length, max(0, maxLoc - loc))
                 textView.selectedRange = NSRange(location: loc, length: len)
+            }
+            isApplyingHighlight = false
+            // Enter / edits can change lines while highlight suppresses selection callbacks.
+            if let editor = textView as? EditorTextView, !editor.isDraggingCaret {
+                editor.scrollHorizontallyIfLineChanged()
             }
         }
 
@@ -283,13 +313,52 @@ struct CodeEditorView: UIViewRepresentable {
     }
 }
 
+/// Outer scroller; hosts a non-scrolling `EditorTextView` sized to the full document.
+final class EditorScrollContainer: UIScrollView {
+    let editor: EditorTextView
+
+    override init(frame: CGRect) {
+        editor = EditorTextView(frame: .zero)
+        super.init(frame: frame)
+        alwaysBounceVertical = true
+        alwaysBounceHorizontal = true
+        isDirectionalLockEnabled = true
+        keyboardDismissMode = .interactive
+        contentInsetAdjustmentBehavior = .automatic
+        editor.isScrollEnabled = false
+        addSubview(editor)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = editor.fitContent(viewport: bounds.size)
+        if editor.frame.origin != .zero || abs(editor.frame.width - size.width) > 0.5
+            || abs(editor.frame.height - size.height) > 0.5 {
+            editor.frame = CGRect(origin: .zero, size: size)
+        }
+        if abs(contentSize.width - size.width) > 0.5 || abs(contentSize.height - size.height) > 0.5 {
+            contentSize = size
+        }
+    }
+}
+
 /// UITextView with select-mode, near-caret pan to move caret, and a simple loupe (DESIGN §3.6).
+/// Scrolling is owned by `EditorScrollContainer` — this view is sized to the document.
 final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     var fileKind: EditorInputRules.FileKind = .plain
     private(set) var selectMode = false
     private var draggingCursor = false
     private var selectionAnchor: Int?
     private weak var caretDrag: UIPanGestureRecognizer?
+    private var edgeScrollLink: CADisplayLink?
+    /// Prevents `fitContent` from re-entering via layout.
+    private var isFittingContent = false
+    /// UTF-16 start of the line last used for prefer-left horizontal scroll.
+    private var trackedLineStart: Int = -1
     private let loupe = CaretLoupeView()
     private let dragCaret: UIView = {
         let v = UIView()
@@ -303,15 +372,18 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     /// True while we are programmatically moving the caret so selection guards don't fight us.
     private(set) var isDraggingCaret = false
 
+    private var hostScrollView: UIScrollView? {
+        superview as? UIScrollView
+    }
+
     override var intrinsicContentSize: CGSize {
-        // Let SwiftUI assign the tab's bounds; growing with text prevents scrolling.
         CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
     }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
         // Pan (not long-press): began/changed fire immediately. shouldBegin limits it to
-        // near-caret so scroll pans elsewhere still win.
+        // near-caret so the outer scroll view still wins for far pans.
         let drag = UIPanGestureRecognizer(target: self, action: #selector(handleCaretDrag(_:)))
         drag.delegate = self
         drag.maximumNumberOfTouches = 1
@@ -321,6 +393,166 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+    }
+
+    /// Ask the host scroll container to re-measure after text changes.
+    func relayoutContentSize() {
+        guard let scroll = hostScrollView else { return }
+        scroll.setNeedsLayout()
+        scroll.layoutIfNeeded()
+    }
+
+    /// Size this view (and its text container) to the wider of the viewport and the
+    /// longest line so the outer scroll view can pan over real glyphs (DESIGN §3.2).
+    @discardableResult
+    func fitContent(viewport: CGSize) -> CGSize {
+        guard viewport.width > 1, !isFittingContent else {
+            return bounds.size.width > 1 ? bounds.size : viewport
+        }
+        isFittingContent = true
+        defer { isFittingContent = false }
+
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+
+        let unconstrained = CGSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textContainer.size = unconstrained
+
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        if fullRange.length > 0 {
+            layoutManager.invalidateLayout(forCharacterRange: fullRange, actualCharacterRange: nil)
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let used = layoutManager.usedRect(for: textContainer)
+
+        // Trailing slack keeps the caret from sitting flush against the clip edge.
+        let trailingSlack = textContainer.lineFragmentPadding + 24
+        let width = max(viewport.width, ceil(used.maxX) + trailingSlack)
+        let height = max(
+            viewport.height,
+            ceil(used.maxY) + textContainerInset.top + textContainerInset.bottom
+        )
+
+        textContainer.size = CGSize(width: width, height: height)
+        layoutManager.ensureLayout(for: textContainer)
+        return CGSize(width: width, height: height)
+    }
+
+    func resetTrackedLine() {
+        trackedLineStart = -1
+    }
+
+    func syncTrackedLineWithoutScrolling() {
+        trackedLineStart = currentLineStartUTF16()
+    }
+
+    /// When the caret moves to another line, prefer scrolling X back toward 0.
+    func scrollHorizontallyIfLineChanged() {
+        let lineStart = currentLineStartUTF16()
+        if trackedLineStart < 0 {
+            trackedLineStart = lineStart
+            return
+        }
+        guard lineStart != trackedLineStart else { return }
+        scrollHorizontallyPreferringLeadingEdge(forceLineTracking: true)
+    }
+
+    /// Scroll the host scroller's X as far left as possible while keeping the caret
+    /// visible; if the whole line fits, snap to x = 0 (DESIGN §3.6).
+    func scrollHorizontallyPreferringLeadingEdge(forceLineTracking: Bool = false) {
+        if forceLineTracking {
+            trackedLineStart = currentLineStartUTF16()
+        }
+        relayoutContentSize()
+        guard let scroll = hostScrollView else { return }
+
+        let ns = text as NSString? ?? ""
+        let caretIndex = max(0, min(selectedRange.location, ns.length))
+        let lineRange = lineCharacterRange(containingUTF16: caretIndex)
+        let lineRect = contentRect(forCharacterRange: lineRange)
+        let caret = caretContentRect(atUTF16: caretIndex)
+
+        let visibleWidth = scroll.bounds.width
+        let visibleHeight = scroll.bounds.height
+        let margin: CGFloat = 24
+        let maxOffsetX = max(0, scroll.contentSize.width - visibleWidth)
+        let maxOffsetY = max(0, scroll.contentSize.height - visibleHeight)
+
+        var offset = scroll.contentOffset
+
+        // Keep caret vertically in view when jumping (e.g. diagnostic reveal).
+        if caret.minY < offset.y {
+            offset.y = max(0, caret.minY - margin)
+        } else if caret.maxY > offset.y + visibleHeight {
+            offset.y = min(maxOffsetY, caret.maxY + margin - visibleHeight)
+        }
+
+        if lineRect.maxX <= visibleWidth {
+            offset.x = 0
+        } else {
+            offset.x = min(maxOffsetX, max(0, caret.maxX + margin - visibleWidth))
+        }
+
+        offset.x = min(max(0, offset.x), maxOffsetX)
+        offset.y = min(max(0, offset.y), maxOffsetY)
+        guard abs(scroll.contentOffset.x - offset.x) > 0.5
+            || abs(scroll.contentOffset.y - offset.y) > 0.5
+        else { return }
+        scroll.setContentOffset(offset, animated: false)
+    }
+
+    private func currentLineStartUTF16() -> Int {
+        lineCharacterRange(containingUTF16: selectedRange.location).location
+    }
+
+    private func lineCharacterRange(containingUTF16 location: Int) -> NSRange {
+        let ns = text as NSString? ?? ""
+        guard ns.length > 0 else { return NSRange(location: 0, length: 0) }
+        if location >= ns.length {
+            // Caret at end of document: if the last char is a newline, we're on a new empty line.
+            if ns.character(at: ns.length - 1) == 10 {
+                return NSRange(location: ns.length, length: 0)
+            }
+            var lineStart = 0
+            var lineEnd = 0
+            var contentsEnd = 0
+            ns.getLineStart(&lineStart, end: &lineEnd, contentsEnd: &contentsEnd, for: NSRange(location: ns.length - 1, length: 0))
+            return NSRange(location: lineStart, length: contentsEnd - lineStart)
+        }
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        ns.getLineStart(&lineStart, end: &lineEnd, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+        return NSRange(location: lineStart, length: contentsEnd - lineStart)
+    }
+
+    private func contentRect(forCharacterRange range: NSRange) -> CGRect {
+        guard range.length > 0 else {
+            let originX = textContainerInset.left + textContainer.lineFragmentPadding
+            return CGRect(x: originX, y: textContainerInset.top, width: 0, height: font?.lineHeight ?? 18)
+        }
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        rect.origin.x += textContainerInset.left
+        rect.origin.y += textContainerInset.top
+        return rect
+    }
+
+    private func caretContentRect(atUTF16 index: Int) -> CGRect {
+        let ns = text as NSString? ?? ""
+        let safe = max(0, min(index, ns.length))
+        guard let pos = position(from: beginningOfDocument, offset: safe) else {
+            let originX = textContainerInset.left + textContainer.lineFragmentPadding
+            return CGRect(x: originX, y: textContainerInset.top, width: 2, height: font?.lineHeight ?? 18)
+        }
+        var rect = caretRect(for: pos)
+        if rect.isNull || rect.isInfinite || rect.height < 1 {
+            rect = CGRect(x: rect.origin.x, y: rect.origin.y, width: 2, height: font?.lineHeight ?? 18)
+        }
+        return rect
     }
 
     override func didMoveToWindow() {
@@ -407,16 +639,31 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         return NSRange(location: start, length: max(0, end - start))
     }
 
-    private func isNearCursor(_ boundsPoint: CGPoint) -> Bool {
+    private func isNearCursor(_ contentPoint: CGPoint) -> Bool {
         let cursorRect = caretRect(for: selectedTextRange?.start ?? beginningOfDocument)
         guard cursorRect.isNull == false, cursorRect.isInfinite == false else { return false }
         guard cursorRect.width < 80, cursorRect.height < 80 else { return false }
-        return cursorRect.insetBy(dx: -36, dy: -36).contains(boundsPoint)
+        return cursorRect.insetBy(dx: -36, dy: -36).contains(contentPoint)
     }
 
-    /// Bounds-space touch → UTF-16 index.
-    /// `closestPosition(to:)` already expects UITextView bounds coords (do not add contentOffset).
-    private func utf16Index(atBoundsPoint point: CGPoint) -> Int {
+    /// True when the point is near the caret or any selection fragment (text-view space).
+    private func isNearEditableHotspot(_ contentPoint: CGPoint) -> Bool {
+        if isNearCursor(contentPoint) { return true }
+        guard selectedRange.length > 0,
+              let start = position(from: beginningOfDocument, offset: selectedRange.location),
+              let end = position(from: beginningOfDocument, offset: selectedRange.location + selectedRange.length),
+              let range = textRange(from: start, to: end)
+        else { return false }
+        for selectionRect in selectionRects(for: range) {
+            if selectionRect.rect.insetBy(dx: -36, dy: -36).contains(contentPoint) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Text-view coordinates → UTF-16 index (view is not itself scrolled).
+    private func utf16Index(atContentPoint point: CGPoint) -> Int {
         guard let pos = closestPosition(to: point) else {
             return selectedRange.location
         }
@@ -424,7 +671,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleCaretDrag(_ gr: UIPanGestureRecognizer) {
-        let boundsPoint = gr.location(in: self)
+        let contentPoint = gr.location(in: self)
         switch gr.state {
         case .began:
             draggingCursor = true
@@ -434,15 +681,18 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
             if selectMode {
                 selectionAnchor = selectedRange.location
             }
-            moveCaret(toBoundsPoint: boundsPoint)
-            showLoupe(atBoundsPoint: boundsPoint)
+            moveCaret(toContentPoint: contentPoint)
+            showLoupe(atContentPoint: contentPoint)
+            startEdgeScroll()
         case .changed:
             guard draggingCursor else { return }
-            moveCaret(toBoundsPoint: boundsPoint)
-            showLoupe(atBoundsPoint: boundsPoint)
+            _ = autoScrollTowardEdges(fingerInTextView: contentPoint)
+            moveCaret(toContentPoint: gr.location(in: self))
+            showLoupe(atContentPoint: gr.location(in: self))
         case .ended, .cancelled, .failed:
+            stopEdgeScroll()
             if gr.state == .ended {
-                moveCaret(toBoundsPoint: boundsPoint)
+                moveCaret(toContentPoint: contentPoint)
             }
             draggingCursor = false
             isDraggingCaret = false
@@ -453,13 +703,67 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
                 tintColor = savedTintColor
                 self.savedTintColor = nil
             }
+            // After drag, snap X toward leading if we landed on a different line.
+            if gr.state == .ended {
+                scrollHorizontallyIfLineChanged()
+            }
         default:
             break
         }
     }
 
-    private func moveCaret(toBoundsPoint point: CGPoint) {
-        let index = utf16Index(atBoundsPoint: point)
+    private func startEdgeScroll() {
+        stopEdgeScroll()
+        let link = CADisplayLink(target: self, selector: #selector(edgeScrollTick))
+        link.add(to: .main, forMode: .common)
+        edgeScrollLink = link
+    }
+
+    private func stopEdgeScroll() {
+        edgeScrollLink?.invalidate()
+        edgeScrollLink = nil
+    }
+
+    @objc private func edgeScrollTick() {
+        guard draggingCursor, let gr = caretDrag, gr.state == .changed || gr.state == .began else { return }
+        let point = gr.location(in: self)
+        guard autoScrollTowardEdges(fingerInTextView: point) else { return }
+        // After scrolling, re-sample so caret tracks the content under the finger.
+        let updated = gr.location(in: self)
+        moveCaret(toContentPoint: updated)
+        showLoupe(atContentPoint: updated)
+    }
+
+    /// When the finger sits near a visible edge of the host scroller, nudge its offset.
+    @discardableResult
+    private func autoScrollTowardEdges(fingerInTextView: CGPoint) -> Bool {
+        guard let scroll = hostScrollView else { return false }
+        let finger = convert(fingerInTextView, to: scroll)
+        let margin: CGFloat = 44
+        let step: CGFloat = 10
+        var offset = scroll.contentOffset
+        let maxX = max(0, scroll.contentSize.width - scroll.bounds.width)
+        let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
+        let visible = scroll.bounds
+
+        if finger.x > visible.maxX - margin {
+            offset.x = min(maxX, offset.x + step)
+        } else if finger.x < visible.minX + margin {
+            offset.x = max(0, offset.x - step)
+        }
+        if finger.y > visible.maxY - margin {
+            offset.y = min(maxY, offset.y + step)
+        } else if finger.y < visible.minY + margin {
+            offset.y = max(0, offset.y - step)
+        }
+
+        guard offset != scroll.contentOffset else { return false }
+        scroll.setContentOffset(offset, animated: false)
+        return true
+    }
+
+    private func moveCaret(toContentPoint point: CGPoint) {
+        let index = utf16Index(atContentPoint: point)
         if selectMode, let anchor = selectionAnchor {
             let start = min(anchor, index)
             let length = abs(anchor - index)
@@ -497,7 +801,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         dragCaret.removeFromSuperview()
     }
 
-    private func showLoupe(atBoundsPoint point: CGPoint) {
+    private func showLoupe(atContentPoint point: CGPoint) {
         guard let host = window else { return }
         if loupe.superview !== host {
             loupe.removeFromSuperview()
@@ -506,7 +810,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         loupe.isHidden = false
         host.bringSubviewToFront(loupe)
         let fingerInHost = convert(point, to: host)
-        loupe.update(source: self, boundsPoint: point, fingerInHost: fingerInHost)
+        loupe.update(source: self, contentPoint: point, fingerInHost: fingerInHost)
     }
 
     private func hideLoupe() {
@@ -516,6 +820,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
 
     /// Remove window-hosted overlays (safe to call from dismantle / navigation).
     func teardownOverlays() {
+        stopEdgeScroll()
         hideLoupe()
         hideDragCaret()
         if let savedTintColor {
@@ -530,8 +835,8 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         guard gestureRecognizer === caretDrag else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
-        if selectMode { return true }
-        return isNearCursor(gestureRecognizer.location(in: self))
+        // Far pans must scroll — even in select mode (DESIGN §3.6).
+        return isNearEditableHotspot(gestureRecognizer.location(in: self))
     }
 
     func gestureRecognizer(
@@ -621,11 +926,11 @@ private final class CaretLoupeView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(source: UITextView, boundsPoint: CGPoint, fingerInHost: CGPoint) {
+    func update(source: UITextView, contentPoint: CGPoint, fingerInHost: CGPoint) {
         let sample = diameter / magnification
         let sampleRect = CGRect(
-            x: boundsPoint.x - sample / 2,
-            y: boundsPoint.y - sample / 2,
+            x: contentPoint.x - sample / 2,
+            y: contentPoint.y - sample / 2,
             width: sample,
             height: sample
         )
@@ -640,7 +945,7 @@ private final class CaretLoupeView: UIView {
             ctx.cgContext.saveGState()
             ctx.cgContext.translateBy(x: -sampleRect.minX * magnification, y: -sampleRect.minY * magnification)
             ctx.cgContext.scaleBy(x: magnification, y: magnification)
-            // Hide loupe from hierarchy snapshot if it were a subview; it's on the window.
+            // Text view is not scrolled; bounds.origin is zero and matches contentPoint.
             source.drawHierarchy(in: source.bounds, afterScreenUpdates: false)
             ctx.cgContext.restoreGState()
         }
@@ -661,8 +966,8 @@ struct CodeEditorView: View {
     @Binding var text: String
     var fileKind: EditorInputRules.FileKind
     var filePath: String? = nil
-    var restoredScrollY: CGFloat = 0
-    var onScrollYChange: ((CGFloat) -> Void)? = nil
+    var restoredScrollOffset: CGPoint = .zero
+    var onScrollOffsetChange: ((CGPoint) -> Void)? = nil
     var revealLine: Int? = nil
     var revealColumn: Int? = nil
     var onRevealConsumed: (() -> Void)? = nil

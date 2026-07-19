@@ -84,7 +84,7 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 #### 3.2 Typography & layout
 
 - **Monospace coding font** (system monospaced at 16pt, horizontally condensed ~15% so more columns fit without shrinking line height).
-- **No soft wrap.** v1: **truncate** on the right (horizontal scrolling may come later).
+- **No soft wrap.** Long lines scroll horizontally.
 - Tab stops are **fixed** every 8 character widths for all file kinds.
 
 #### 3.3 Tabs, spaces, Enter
@@ -117,10 +117,12 @@ Disable spell check, autocorrection, autocapitalization, smart quotes/dashes, lo
 
 | Gesture | Action |
 |---------|--------|
-| **Tap** | Position cursor |
-| **Slow drag starting near the cursor** | Move cursor precisely |
-| **Quick flick, or drag starting well away from the cursor** | Scroll |
+| **Tap** | Position cursor (accounts for horizontal + vertical scroll offset) |
+| **Slow drag starting near the cursor** | Move cursor precisely; auto-scrolls when the finger nears a viewport edge |
+| **Quick flick, or drag starting well away from the cursor** | Scroll (directional lock prefers a dominant axis) |
 | **Once scrolling has begun** | Remain scrolling until finger lifts |
+
+When the caret moves to a **different line**, horizontal scroll prefers `x = 0` as far as possible: if the whole line fits, snap fully left; otherwise keep the caret visible with minimal rightward offset.
 
 **`⋯` menu:** Select, Select All, Cut, Copy, Paste, Undo (Redo if cheap). Hardware shortcuts (Cmd-C/V/X/A/Z, etc.) still work.
 
@@ -137,7 +139,7 @@ Scroll vs select: flick/far-drag still **scrolls**; selection persists while scr
 #### 3.7 Deferred
 
 - Near-cursor / flick thresholds (tune in UI).
-- Horizontal scrolling; trackpad/pointer parity; Redo if not free with Undo.
+- Trackpad/pointer parity; Redo if not free with Undo.
 
 ### 4. Assembler (ca65 subset)
 

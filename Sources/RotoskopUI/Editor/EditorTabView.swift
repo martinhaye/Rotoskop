@@ -30,8 +30,8 @@ struct EditorTabView: View {
                         ),
                         fileKind: workspace.openFileKind,
                         filePath: workspace.openFilePath,
-                        restoredScrollY: workspace.savedScrollOffsetY,
-                        onScrollYChange: { workspace.updateScrollOffsetY($0) },
+                        restoredScrollOffset: workspace.savedScrollOffset,
+                        onScrollOffsetChange: { workspace.updateScrollOffset($0) },
                         revealLine: workspace.revealLine,
                         revealColumn: workspace.revealColumn,
                         onRevealConsumed: {

@@ -34,8 +34,8 @@ final class ProjectWorkspace: ObservableObject {
     @Published var revealLine: Int?
     @Published var revealColumn: Int?
 
-    /// Last scroll offset Y per relative path (session memory; not persisted to disk).
-    private var scrollOffsets: [String: CGFloat] = [:]
+    /// Last scroll offset per relative path (session memory; not persisted to disk).
+    private var scrollOffsets: [String: CGPoint] = [:]
 
     @Published var buildLog: [String] = []
     @Published var buildDiagnostics: [Diagnostic] = []
@@ -200,15 +200,15 @@ final class ProjectWorkspace: ObservableObject {
         }
     }
 
-    /// Scroll Y to restore for the current file (0 if never opened this session).
-    var savedScrollOffsetY: CGFloat {
-        guard let path = openFilePath else { return 0 }
-        return scrollOffsets[path] ?? 0
+    /// Scroll offset to restore for the current file (zero if never opened this session).
+    var savedScrollOffset: CGPoint {
+        guard let path = openFilePath else { return .zero }
+        return scrollOffsets[path] ?? .zero
     }
 
-    func updateScrollOffsetY(_ y: CGFloat) {
+    func updateScrollOffset(_ offset: CGPoint) {
         guard let path = openFilePath else { return }
-        scrollOffsets[path] = max(0, y)
+        scrollOffsets[path] = CGPoint(x: max(0, offset.x), y: max(0, offset.y))
     }
 
     func openFile(_ relativePath: String) {
