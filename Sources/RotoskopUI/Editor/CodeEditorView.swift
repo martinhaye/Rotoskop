@@ -246,24 +246,6 @@ struct CodeEditorView: UIViewRepresentable {
         ) -> Bool {
             guard textView.markedTextRange == nil else { return true }
 
-            if text == " " {
-                let lineInfo = lineContext(in: textView, utf16Offset: range.location)
-                let edit = EditorInputRules.spaceEdit(
-                    kind: parent.fileKind,
-                    line: lineInfo.line,
-                    cursorUTF16Offset: lineInfo.offsetInLine,
-                    replacingSelection: range.length > 0
-                )
-                switch edit {
-                case .insert(let insertion):
-                    replace(in: textView, range: range, with: insertion)
-                case .convertPrecedingSpaceToTab:
-                    let expanded = NSRange(location: range.location - 1, length: range.length + 1)
-                    replace(in: textView, range: expanded, with: "\t")
-                }
-                return false
-            }
-
             if text == "\t" {
                 replace(in: textView, range: range, with: EditorInputRules.tabInsertion())
                 return false

@@ -91,13 +91,9 @@ Out of scope: rebase, cherry-pick, stash UI, submodule management, LFS, blame, i
 
 Tabs display on the standard 8-column stops. Tab count chooses column; no smart field classification.
 
-**Space key (all file kinds):**
-- Inside quotes → ` `
-- In a comment body → ` ` (assembly: after `;`; plain: after `#`)
-- Otherwise, if the character immediately before the caret is a space → convert that space to `\t` (double-space → tab)
-- Otherwise → ` `
+**Space key (all file kinds):** always inserts a space. Use the dedicated **tab** key for `\t`.
 
-**Tab key:** always `\t` (hardware / paste).
+**Tab key:** always `\t`.
 
 **Enter (all file kinds):** insert newline, then copy the **leading whitespace** (spaces/tabs) of the current line (auto-indent); backspace clears it as usual.
 

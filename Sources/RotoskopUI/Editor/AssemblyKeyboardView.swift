@@ -88,6 +88,9 @@ final class AssemblyKeyboardView: UIInputView {
     }
 
     private func buildLetters() {
+        // Top symbols by frequency in for_ref/runix hand-written .s/.i
+        // (immediate repeats collapsed, so ***** counts once).
+        addRow(["\"", ".", "\\", ";", ",", "$", "_", ":", "=", "*"])
         addRow(["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"], letterRow: true)
         addRow(["A", "S", "D", "F", "G", "H", "J", "K", "L"], letterRow: true, inset: 16)
         addLetterBottomLetterRow()

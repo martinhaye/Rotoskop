@@ -11,67 +11,8 @@ struct EditorInputRulesTests {
         #expect(EditorInputRules.FileKind.kind(forRelativePath: "README.md") == .plain)
     }
 
-    @Test func singleSpaceInsertsSpace() {
-        #expect(
-            EditorInputRules.spaceEdit(kind: .assembly, line: "lda", cursorUTF16Offset: 3)
-                == .insert(" ")
-        )
-        #expect(
-            EditorInputRules.spaceEdit(kind: .plain, line: "key:", cursorUTF16Offset: 4)
-                == .insert(" ")
-        )
-    }
-
-    @Test func doubleSpaceConvertsToTab() {
-        #expect(
-            EditorInputRules.spaceEdit(kind: .assembly, line: "lda ", cursorUTF16Offset: 4)
-                == .convertPrecedingSpaceToTab
-        )
-        #expect(
-            EditorInputRules.spaceEdit(kind: .plain, line: "key: ", cursorUTF16Offset: 5)
-                == .convertPrecedingSpaceToTab
-        )
-    }
-
-    @Test func spaceRulesInsideQuotesAndComments() {
-        // Inside quotes → space (even after a space)
-        let quoted = "msg: .byte \"hello "
-        #expect(
-            EditorInputRules.spaceEdit(kind: .assembly, line: quoted, cursorUTF16Offset: quoted.utf16.count)
-                == .insert(" ")
-        )
-
-        // In assembly comment body → space (even after a space)
-        let comment = "lda #0 ; note "
-        #expect(
-            EditorInputRules.spaceEdit(kind: .assembly, line: comment, cursorUTF16Offset: comment.utf16.count)
-                == .insert(" ")
-        )
-
-        // In plain (#) comment body → space
-        let yamlComment = "key: x # note "
-        #expect(
-            EditorInputRules.spaceEdit(kind: .plain, line: yamlComment, cursorUTF16Offset: yamlComment.utf16.count)
-                == .insert(" ")
-        )
-
-        // Semicolon inside quotes is not a comment; trailing space still converts
-        let fake = ".byte \"; not comment\" "
-        #expect(
-            EditorInputRules.spaceEdit(kind: .assembly, line: fake, cursorUTF16Offset: fake.utf16.count)
-                == .convertPrecedingSpaceToTab
-        )
-    }
-
-    @Test func replacingSelectionDoesNotConvert() {
-        #expect(
-            EditorInputRules.spaceEdit(
-                kind: .assembly,
-                line: "lda ",
-                cursorUTF16Offset: 4,
-                replacingSelection: true
-            ) == .insert(" ")
-        )
+    @Test func tabInsertsTab() {
+        #expect(EditorInputRules.tabInsertion() == "\t")
     }
 
     @Test func enterAutoIndentCopiesLeadingWhitespace() {
