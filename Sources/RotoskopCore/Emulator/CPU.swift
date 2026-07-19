@@ -1,4 +1,5 @@
-/// Results-accurate 6502 CPU (not cycle-accurate). Official opcode set only.
+/// Results-accurate 6502 CPU with approximate cycle counting.
+/// Base NMOS times +1 when a branch is taken; page-cross penalties omitted.
 public final class CPU {
     public static let flagC: UInt8 = 0x01
     public static let flagZ: UInt8 = 0x02
@@ -27,6 +28,8 @@ public final class CPU {
     public private(set) var halted = false
     public private(set) var stopReason: StopReason?
     public private(set) var instructionCount = 0
+    /// Approximate elapsed 6502 cycles (see file comment).
+    public private(set) var cycleCount = 0
 
     public var traceEnabled = false
     public private(set) var traceLog: [String] = []
@@ -34,6 +37,8 @@ public final class CPU {
     public var pcHooks: [UInt16: () -> Void] = [:]
 
     private var opcodes: [(() -> Void)?] = Array(repeating: nil, count: 256)
+    /// Extra cycles for the instruction currently executing (e.g. branch taken).
+    private var stepExtraCycles = 0
 
     public init(memory: Memory) {
         self.memory = memory
@@ -55,6 +60,8 @@ public final class CPU {
         halted = false
         stopReason = nil
         instructionCount = 0
+        cycleCount = 0
+        stepExtraCycles = 0
         traceLog = []
     }
 
@@ -227,7 +234,10 @@ public final class CPU {
 
     func opBranch(_ condition: Bool) {
         let target = addrRelative()
-        if condition { pc = target }
+        if condition {
+            stepExtraCycles = 1 // taken (+1); page-cross +1 omitted
+            pc = target
+        }
     }
 
     func opBIT(_ addr: UInt16) {
@@ -726,6 +736,7 @@ public final class CPU {
         if let hook = pcHooks[pc] {
             hook()
             instructionCount += 1
+            cycleCount += OpcodeCycles.pcHookCycles
             return !halted
         }
 
@@ -746,8 +757,10 @@ public final class CPU {
             traceLog.append(String(format: "$%04X: %@  %@", pcBefore, padded, formatState()))
         }
 
+        stepExtraCycles = 0
         op()
         instructionCount += 1
+        cycleCount += Int(OpcodeCycles.base[Int(opcode)]) + stepExtraCycles
         return !halted
     }
 
@@ -758,14 +771,34 @@ public final class CPU {
     /// it does not set `halted`, so the app can call `run` again in a chunked loop.
     @discardableResult
     public func run(maxInstructions: Int = 1000) -> StopReason {
-        if stopReason == .instructionLimit {
-            stopReason = nil
-        }
+        clearSoftLimit()
         let limit = instructionCount + maxInstructions
         while instructionCount < limit {
             if !step() { break }
         }
-        if !halted && instructionCount >= limit {
+        return finishSoftLimit(hit: !halted && instructionCount >= limit)
+    }
+
+    /// Run until halt or until at least `maxCycles` additional cycles have elapsed.
+    /// May overshoot by up to one instruction. Soft-pauses with `.instructionLimit`.
+    @discardableResult
+    public func run(maxCycles: Int) -> StopReason {
+        clearSoftLimit()
+        let limit = cycleCount + max(1, maxCycles)
+        while cycleCount < limit {
+            if !step() { break }
+        }
+        return finishSoftLimit(hit: !halted && cycleCount >= limit)
+    }
+
+    private func clearSoftLimit() {
+        if stopReason == .instructionLimit {
+            stopReason = nil
+        }
+    }
+
+    private func finishSoftLimit(hit: Bool) -> StopReason {
+        if hit {
             stopReason = .instructionLimit
             return .instructionLimit
         }

@@ -92,6 +92,12 @@ struct ProjectShellView: View {
         .onDisappear {
             workspace.flushBeforeLeaving()
         }
+        .onChange(of: workspace.selectedTab) { _, tab in
+            workspace.setRunTabActive(tab == .run)
+        }
+        .onAppear {
+            workspace.setRunTabActive(workspace.selectedTab == .run)
+        }
     }
 
     private var title: String {

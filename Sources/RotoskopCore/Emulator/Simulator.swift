@@ -86,7 +86,14 @@ public final class Simulator {
         return cpu.run(maxInstructions: maxInstructions)
     }
 
+    @discardableResult
+    public func run(maxCycles: Int, trace: Bool = false) -> StopReason {
+        cpu.traceEnabled = trace
+        return cpu.run(maxCycles: maxCycles)
+    }
+
     public var instructionCount: Int { cpu.instructionCount }
+    public var cycleCount: Int { cpu.cycleCount }
     public var trace: [String] { cpu.traceLog }
 
     public func dumpMemory(from start: UInt16, length: Int) -> [UInt8] {

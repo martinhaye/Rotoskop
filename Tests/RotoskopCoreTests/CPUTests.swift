@@ -258,6 +258,62 @@ struct ControlFlowTests {
     }
 }
 
+@Suite("Cycle counting")
+struct CycleCountTests {
+    @Test func nopIsTwoCycles() {
+        let mem = Memory()
+        let cpu = CPU(memory: mem)
+        mem.setResetVector(0x1000)
+        mem.write(0x1000, 0xEA) // NOP
+        mem.write(0x1001, 0x4C)
+        mem.write(0x1002, 0xF9)
+        mem.write(0x1003, 0xFF) // JMP $FFF9
+        cpu.reset()
+        #expect(cpu.step())
+        #expect(cpu.cycleCount == 2)
+        #expect(cpu.instructionCount == 1)
+    }
+
+    @Test func branchTakenAddsOneCycle() {
+        let mem = Memory()
+        let cpu = CPU(memory: mem)
+        mem.setResetVector(0x1000)
+        // BNE +2 (taken, Z clear after reset... Z is clear by default? reset doesn't set Z specially; a=0 so Z would be from prior. After reset a=0 but Z flag not auto-set from a.
+        // Use BCS with C set via SEC first.
+        mem.write(0x1000, 0x38) // SEC
+        mem.write(0x1001, 0xB0) // BCS +2 → lands at $1005
+        mem.write(0x1002, 0x02)
+        mem.write(0x1003, 0xEA) // NOP (skipped)
+        mem.write(0x1004, 0xEA) // NOP (skipped)
+        mem.write(0x1005, 0xEA) // NOP (landing)
+        mem.write(0x1006, 0x4C)
+        mem.write(0x1007, 0xF9)
+        mem.write(0x1008, 0xFF)
+        cpu.reset()
+        #expect(cpu.step()) // SEC = 2
+        #expect(cpu.cycleCount == 2)
+        #expect(cpu.step()) // BCS taken = 2+1
+        #expect(cpu.cycleCount == 5)
+        #expect(cpu.pc == 0x1005)
+    }
+
+    @Test func runMaxCyclesSoftPauses() {
+        let mem = Memory()
+        let cpu = CPU(memory: mem)
+        mem.setResetVector(0x1000)
+        mem.write(0x1000, 0xEA) // NOP
+        mem.write(0x1001, 0x4C)
+        mem.write(0x1002, 0x00)
+        mem.write(0x1003, 0x10) // JMP $1000
+        cpu.reset()
+        let reason = cpu.run(maxCycles: 20)
+        #expect(reason == .instructionLimit)
+        #expect(cpu.halted == false)
+        #expect(cpu.cycleCount >= 20)
+        #expect(cpu.cycleCount < 20 + 7) // overshoot at most one instr
+    }
+}
+
 @Suite("Instruction limit")
 struct RunLimitTests {
     @Test func hitsLimit() {

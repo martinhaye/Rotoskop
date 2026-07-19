@@ -2,7 +2,7 @@
 public enum StopReason: Equatable, Sendable {
     /// PC reached `$FFF9` (cc65 / runix success halt).
     case success
-    /// Hit the instruction cap without other stop.
+    /// Soft pause for chunked run loops (instruction or cycle batch cap).
     case instructionLimit
     /// `BRK` with IRQ/BRK vector never written since reset.
     case unhandledBRK

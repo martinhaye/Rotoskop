@@ -9,6 +9,17 @@ public final class AppModel: ObservableObject {
     @Published public var errorMessage: String?
     @Published public var isBusy = false
     @Published public var hasPAT: Bool = false
+    /// Target emulator clock (MHz); persisted in UserDefaults.
+    @Published public var clockMHz: Double = EmulationPreferences.clockMHz {
+        didSet {
+            let clamped = EmulationPreferences.clamp(clockMHz)
+            if clamped != clockMHz {
+                clockMHz = clamped
+                return
+            }
+            EmulationPreferences.clockMHz = clockMHz
+        }
+    }
 
     public let store: ProjectStore
     public let patStore: any PATStore
@@ -16,6 +27,7 @@ public final class AppModel: ObservableObject {
     public init(store: ProjectStore, patStore: any PATStore) {
         self.store = store
         self.patStore = patStore
+        self.clockMHz = EmulationPreferences.clockMHz
         refresh()
     }
 

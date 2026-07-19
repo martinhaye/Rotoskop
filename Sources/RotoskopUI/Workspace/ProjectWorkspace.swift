@@ -59,6 +59,7 @@ final class ProjectWorkspace: ObservableObject {
     private let sessionBox = EmulatorSessionBox()
     /// Bumped on each start/stop so an old run's completion cannot clobber a newer session.
     private var runGeneration = 0
+    private var runTabActive = false
 
     /// Thread-safe holder so the run loop stays off the MainActor.
     private final class EmulatorSessionBox: @unchecked Sendable {
@@ -97,6 +98,15 @@ final class ProjectWorkspace: ObservableObject {
             cpu?.requestStop()
         }
 
+        func setPaused(_ paused: Bool, mhz: Double? = nil) {
+            lock.lock()
+            if let mhz {
+                control?.targetMHz = mhz
+            }
+            control?.setPaused(paused)
+            lock.unlock()
+        }
+
         var isStopped: Bool {
             lock.lock()
             defer { lock.unlock() }
@@ -114,10 +124,23 @@ final class ProjectWorkspace: ObservableObject {
     private final class RunControl: @unchecked Sendable {
         private let lock = NSLock()
         private var stopped = false
+        private var paused = false
+        var targetMHz: Double
+
+        init(targetMHz: Double) {
+            self.targetMHz = targetMHz
+        }
 
         func stop() {
             lock.lock()
             stopped = true
+            paused = false
+            lock.unlock()
+        }
+
+        func setPaused(_ value: Bool) {
+            lock.lock()
+            paused = value
             lock.unlock()
         }
 
@@ -125,6 +148,18 @@ final class ProjectWorkspace: ObservableObject {
             lock.lock()
             defer { lock.unlock() }
             return stopped
+        }
+
+        var isPaused: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return paused
+        }
+
+        func currentMHz() -> Double {
+            lock.lock()
+            defer { lock.unlock() }
+            return targetMHz
         }
     }
 
@@ -337,6 +372,20 @@ final class ProjectWorkspace: ObservableObject {
         stopEmulator()
     }
 
+    /// Pause the emulator when leaving the Run tab; resume (with current Settings MHz) when returning.
+    func setRunTabActive(_ active: Bool) {
+        runTabActive = active
+        guard isRunning else { return }
+        if active {
+            let mhz = EmulationPreferences.clockMHz
+            sessionBox.setPaused(false, mhz: mhz)
+            runStatus = EmulationPreferences.formatMHz(mhz)
+        } else {
+            sessionBox.setPaused(true)
+            runStatus = "Paused"
+        }
+    }
+
     // MARK: - Build
 
     @discardableResult
@@ -382,8 +431,9 @@ final class ProjectWorkspace: ObservableObject {
 
     func startRun() async {
         _ = saveDocumentNow()
-        selectedTab = .run
         stopEmulator()
+        selectedTab = .run
+        setRunTabActive(true)
 
         let root = projectRootPath
         let needsBuild: Bool = await Task.detached(priority: .utility) {
@@ -400,10 +450,12 @@ final class ProjectWorkspace: ObservableObject {
             let ok = await runBuild(switchToBuildTab: false)
             if !ok {
                 selectedTab = .build
+                setRunTabActive(false)
                 runStatus = "Build failed — fix diagnostics before Run"
                 return
             }
             selectedTab = .run
+            setRunTabActive(true)
         }
 
         do {
@@ -431,7 +483,11 @@ final class ProjectWorkspace: ObservableObject {
         sessionBox.clear()
         isRunning = false
         lastInjectedKey = nil
-        if runStatus == "Running…" || runStatus == "Building first…" {
+        if runStatus == "Running…"
+            || runStatus == "Building first…"
+            || runStatus == "Paused"
+            || runStatus.hasSuffix("MHz")
+        {
             runStatus = "Stopped"
         }
     }
@@ -451,14 +507,23 @@ final class ProjectWorkspace: ObservableObject {
     private func beginEmulator(session: RunSession) {
         runGeneration += 1
         let generation = runGeneration
-        let control = RunControl()
+        let mhz = EmulationPreferences.clockMHz
+        let control = RunControl(targetMHz: mhz)
+        if !runTabActive {
+            control.setPaused(true)
+        }
         isRunning = true
         stopReasonText = nil
         registerDump = nil
         lastInjectedKey = nil
         screenText = ""
         screenDisplay = AttributedString()
-        runStatus = "Running…"
+        runStatus = runTabActive ? EmulationPreferences.formatMHz(mhz) : "Paused"
+
+        let batchSeconds = 0.005
+        let budgetNanos = UInt64(batchSeconds * 1_000_000_000.0)
+        /// Refresh text screen ~60 Hz; rate text still updates every batch.
+        let uiEveryBatches = 3
 
         emuQueue.async { [sessionBox] in
             do {
@@ -470,17 +535,85 @@ final class ProjectWorkspace: ObservableObject {
                 try sim.load()
                 sessionBox.install(keyboard: kbd, control: control, cpu: sim.cpu, generation: generation)
 
-                let chunk = 25_000
                 var finalReason: StopReason = .instructionLimit
+                var nextDeadline = DispatchTime.now()
+                var rateWindowStart = nextDeadline
+                var cyclesAtRateWindowStart = sim.cycleCount
+                var batchesSinceUI = uiEveryBatches // force first paint promptly
+                var wasPaused = control.isPaused
+
                 while !control.isStopped {
-                    let reason = sim.run(maxInstructions: chunk, trace: false)
-                    let cells = sim.dumpScreenCells()
-                    let screen = TextScreen.dumpCellsToString(cells)
+                    while control.isPaused && !control.isStopped {
+                        wasPaused = true
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    if control.isStopped { break }
+
+                    // After a pause, restart the wall-clock schedule so catch-up
+                    // doesn't try to "owe" cycles for time spent paused.
+                    if wasPaused {
+                        wasPaused = false
+                        nextDeadline = DispatchTime.now()
+                        rateWindowStart = nextDeadline
+                        cyclesAtRateWindowStart = sim.cycleCount
+                    }
+
+                    let targetMHz = control.currentMHz()
+                    let cyclesTarget = max(1, Int((targetMHz * 1_000_000.0 * batchSeconds).rounded()))
+
+                    let reason = sim.run(maxCycles: cyclesTarget, trace: false)
+
+                    nextDeadline = DispatchTime(
+                        uptimeNanoseconds: nextDeadline.uptimeNanoseconds &+ budgetNanos
+                    )
+                    let nowAfterRun = DispatchTime.now()
+                    if nowAfterRun.uptimeNanoseconds < nextDeadline.uptimeNanoseconds {
+                        Self.waitUntil(nextDeadline)
+                    } else if nowAfterRun.uptimeNanoseconds
+                        > nextDeadline.uptimeNanoseconds &+ budgetNanos &* 4
+                    {
+                        // Hopelessly behind (e.g. debugger) — snap schedule forward.
+                        nextDeadline = nowAfterRun
+                    }
+                    // else: slightly behind → no sleep; next iterations catch up.
+
+                    let now = DispatchTime.now()
+                    let windowNanos = now.uptimeNanoseconds &- rateWindowStart.uptimeNanoseconds
+                    let windowCycles = sim.cycleCount - cyclesAtRateWindowStart
+                    let effectiveMHz: Double
+                    if windowNanos > 5_000_000 {
+                        effectiveMHz = Double(windowCycles)
+                            / (Double(windowNanos) / 1_000_000_000.0)
+                            / 1_000_000.0
+                    } else {
+                        effectiveMHz = targetMHz
+                    }
+
+                    batchesSinceUI += 1
+                    let paintUI = batchesSinceUI >= uiEveryBatches || reason != .instructionLimit
+                    let cells: [[TextScreen.Cell]]?
+                    let screen: String?
+                    if paintUI {
+                        batchesSinceUI = 0
+                        let c = sim.dumpScreenCells()
+                        cells = c
+                        screen = TextScreen.dumpCellsToString(c)
+                    } else {
+                        cells = nil
+                        screen = nil
+                    }
+
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.runGeneration == generation, !control.isStopped else { return }
-                        self.screenText = screen
-                        self.screenDisplay = Self.attributedScreen(cells)
+                        if let cells, let screen {
+                            self.screenText = screen
+                            self.screenDisplay = Self.attributedScreen(cells)
+                        }
+                        if !control.isPaused {
+                            self.runStatus = EmulationPreferences.formatMHz(effectiveMHz)
+                        }
                     }
+
                     if reason != .instructionLimit {
                         finalReason = reason
                         break
@@ -513,6 +646,21 @@ final class ProjectWorkspace: ObservableObject {
                     self.isRunning = false
                 }
             }
+        }
+    }
+
+    /// Sleep most of the way to `deadline`, then spin for the last ~0.1 ms so
+    /// `Thread.sleep` overshoot does not stretch every batch.
+    nonisolated private static func waitUntil(_ deadline: DispatchTime) {
+        while true {
+            let now = DispatchTime.now().uptimeNanoseconds
+            let target = deadline.uptimeNanoseconds
+            if now >= target { return }
+            let remaining = target &- now
+            if remaining > 150_000 {
+                Thread.sleep(forTimeInterval: Double(remaining &- 80_000) / 1_000_000_000.0)
+            }
+            // else: busy-wait the last ~0.15 ms
         }
     }
 
