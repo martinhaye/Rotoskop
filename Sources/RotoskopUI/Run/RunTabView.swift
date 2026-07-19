@@ -131,6 +131,7 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
         field.onKey = { [weak coordinator = context.coordinator] text in
             coordinator?.forward(text)
         }
+        context.coordinator.installAccessory(on: field)
         return field
     }
 
@@ -140,11 +141,13 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
         uiView.onKey = { [weak coordinator = context.coordinator] text in
             coordinator?.forward(text)
         }
+        context.coordinator.installAccessory(on: uiView)
         if isEnabled {
             if !uiView.isFirstResponder {
                 // Async: becoming first responder during updateUIView is unreliable.
                 DispatchQueue.main.async {
                     _ = uiView.becomeFirstResponder()
+                    uiView.reloadInputViews()
                 }
             }
         } else if uiView.isFirstResponder {
@@ -155,9 +158,25 @@ private struct EmulatorKeyboardField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextFieldDelegate {
         var onCharacters: (String) -> Void
         weak var field: KeyInterceptField?
+        /// Keep the bar alive across representable updates.
+        private var accessory: AssemblySymbolAccessoryBar?
 
         init(onCharacters: @escaping (String) -> Void) {
             self.onCharacters = onCharacters
+        }
+
+        func installAccessory(on field: KeyInterceptField) {
+            if accessory == nil {
+                accessory = AssemblySymbolAccessoryBar { [weak self] text in
+                    self?.forward(text)
+                }
+            }
+            if field.inputAccessoryView !== accessory {
+                field.inputAccessoryView = accessory
+                if field.isFirstResponder {
+                    field.reloadInputViews()
+                }
+            }
         }
 
         func forward(_ string: String) {
