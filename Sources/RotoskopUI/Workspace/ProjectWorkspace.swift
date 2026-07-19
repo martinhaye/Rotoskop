@@ -23,6 +23,8 @@ final class ProjectWorkspace: ObservableObject {
     let projectName: String
 
     @Published var selectedTab: Tab = .files
+    /// Tab to restore when leaving Run via the hijacked back button (edit↔run loop).
+    var tabBeforeRun: Tab = .files
     @Published var tree: [ProjectFileSystem.Node] = []
     @Published var openFilePath: String?
     @Published var documentText: String = ""

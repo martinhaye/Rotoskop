@@ -10,7 +10,7 @@ struct RepoListView: View {
 
     var body: some View {
         listContent
-            .navigationTitle("Projects")
+            .navigationTitle("Rotoskop: projects")
             .navigationDestination(for: ProjectRecord.self) { project in
                 ProjectShellView(project: project, model: model)
             }

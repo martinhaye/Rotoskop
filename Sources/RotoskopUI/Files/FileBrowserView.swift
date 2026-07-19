@@ -24,20 +24,30 @@ struct FileBrowserView: View {
                     description: Text("Create a file to get started.")
                 )
             } else {
-                List {
-                    ForEach(workspace.tree) { node in
-                        FileNodeRow(
-                            node: node,
-                            onOpen: { workspace.openFile($0) },
-                            onCreateFile: { beginCreateFile(in: $0) },
-                            onCreateFolder: { beginCreateFolder(in: $0) },
-                            onRename: { beginRename($0) },
-                            onMove: { beginMove($0) },
-                            onDelete: { deletePath = $0 }
-                        )
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(workspace.tree) { node in
+                            FileNodeRow(
+                                node: node,
+                                onOpen: { workspace.openFile($0) },
+                                onCreateFile: { beginCreateFile(in: $0) },
+                                onCreateFolder: { beginCreateFolder(in: $0) },
+                                onRename: { beginRename($0) },
+                                onMove: { beginMove($0) },
+                                onDelete: { deletePath = $0 },
+                                onExpand: { path in
+                                    DispatchQueue.main.async {
+                                        withAnimation {
+                                            proxy.scrollTo(path, anchor: .top)
+                                        }
+                                    }
+                                }
+                            )
+                            .id(node.relativePath)
+                        }
                     }
+                    .listStyle(.plain)
                 }
-                .listStyle(.plain)
             }
         }
         .toolbar {
@@ -164,10 +174,13 @@ private struct FileNodeRow: View {
     let onRename: (String) -> Void
     let onMove: (String) -> Void
     let onDelete: (String) -> Void
+    let onExpand: (String) -> Void
+
+    @State private var isExpanded = false
 
     var body: some View {
         if node.isDirectory {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $isExpanded) {
                 ForEach(node.children) { child in
                     FileNodeRow(
                         node: child,
@@ -176,12 +189,19 @@ private struct FileNodeRow: View {
                         onCreateFolder: onCreateFolder,
                         onRename: onRename,
                         onMove: onMove,
-                        onDelete: onDelete
+                        onDelete: onDelete,
+                        onExpand: onExpand
                     )
+                    .id(child.relativePath)
                 }
             } label: {
                 Label(node.name, systemImage: folderIcon)
                     .contextMenu { directoryMenu }
+            }
+            .onChange(of: isExpanded) { _, expanded in
+                if expanded {
+                    onExpand(node.relativePath)
+                }
             }
         } else {
             Button {

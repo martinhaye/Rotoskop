@@ -37,11 +37,17 @@ struct RunTabView: View {
             .padding(.vertical, 8)
 
             ZStack {
-                ScrollView {
-                    screenText
-                        .font(.system(.body, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(12)
+                GeometryReader { geo in
+                    let horizontalPadding: CGFloat = 12
+                    let font = Font(EmulatorScreenFont.make(
+                        fittingWidth: max(0, geo.size.width - horizontalPadding * 2)
+                    ))
+                    ScrollView {
+                        screenText
+                            .font(font)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(horizontalPadding)
+                    }
                 }
                 .background(Color.black.opacity(0.05))
 

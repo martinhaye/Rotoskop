@@ -39,8 +39,10 @@ struct ProjectShellView: View {
         .navigationTitle(title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        // Editor is a tab switch, not a push — hijack back so it returns to Files, not repos.
-        .navigationBarBackButtonHidden(workspace.selectedTab == .editor)
+        // Editor/Run are tab switches, not pushes — hijack back so it stays in-project.
+        .navigationBarBackButtonHidden(
+            workspace.selectedTab == .editor || workspace.selectedTab == .run
+        )
         #endif
         .toolbar {
             #if os(iOS)
@@ -52,6 +54,17 @@ struct ProjectShellView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
                             Text("Files")
+                        }
+                    }
+                }
+            } else if workspace.selectedTab == .run {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        workspace.selectedTab = workspace.tabBeforeRun
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text(backLabel(for: workspace.tabBeforeRun))
                         }
                     }
                 }
@@ -92,7 +105,10 @@ struct ProjectShellView: View {
         .onDisappear {
             workspace.flushBeforeLeaving()
         }
-        .onChange(of: workspace.selectedTab) { _, tab in
+        .onChange(of: workspace.selectedTab) { previous, tab in
+            if tab == .run, previous != .run {
+                workspace.tabBeforeRun = previous
+            }
             workspace.setRunTabActive(tab == .run)
         }
         .onAppear {
@@ -105,6 +121,15 @@ struct ProjectShellView: View {
             return "\(project.name) · \(branchName)"
         }
         return project.name
+    }
+
+    private func backLabel(for tab: ProjectWorkspace.Tab) -> String {
+        switch tab {
+        case .files: return "Files"
+        case .editor: return "Editor"
+        case .build: return "Build"
+        case .run: return "Files"
+        }
     }
 
     private var errorPresented: Binding<Bool> {
