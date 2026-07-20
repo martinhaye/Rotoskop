@@ -101,6 +101,7 @@ Tabs display on the standard 8-column stops. Tab count chooses column; no smart 
 
 - Assembly only, simple (comments, directives, opcodes, numbers, strings, labels—palette TBD).
 - No JS/YAML highlighter in v1.
+- Highlight updates must not move the scroll viewport; recolor in place and keep the caret’s offset stable while typing.
 
 #### 3.5 Persistence & diagnostics
 

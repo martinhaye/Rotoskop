@@ -277,26 +277,62 @@ struct CodeEditorView: UIViewRepresentable {
 
         func applyAttributedText(to textView: UITextView, string: String, forceCursor: NSRange?) {
             isApplyingHighlight = true
+            let editor = textView as? EditorTextView
+
+            let scroll = editor.flatMap { $0.superview as? UIScrollView }
+            let savedOffset = scroll?.contentOffset
+
             let font = EditorCodingFont.make()
-            let attributed = AssemblyHighlighter.attributedString(
-                for: string,
-                font: font,
-                isAssembly: parent.fileKind == .assembly
-            )
+            let baseAttrs = AssemblyHighlighter.baseAttributes(font: font)
             textView.font = font
-            textView.attributedText = attributed
-            if let editor = textView as? EditorTextView {
-                editor.relayoutContentSize()
+            textView.typingAttributes = baseAttrs
+
+            let existing = textView.text ?? ""
+            if existing == string {
+                // Typing path: string is already correct — only recolor in place.
+                // Replacing `attributedText` would make UIKit scroll ancestors to a stale selection.
+                AssemblyHighlighter.applyHighlighting(
+                    to: textView.textStorage,
+                    font: font,
+                    isAssembly: parent.fileKind == .assembly
+                )
+            } else {
+                let attributed = AssemblyHighlighter.attributedString(
+                    for: string,
+                    font: font,
+                    isAssembly: parent.fileKind == .assembly
+                )
+                textView.textStorage.beginEditing()
+                textView.textStorage.setAttributedString(attributed)
+                textView.textStorage.endEditing()
             }
+
+            // Remeasure document size (line length / height may have changed) without
+            // letting UIKit move the viewport; restore offset below.
+            editor?.relayoutContentSize()
+
             if let forceCursor {
                 let maxLoc = (textView.text as NSString?)?.length ?? 0
                 let loc = min(forceCursor.location, maxLoc)
                 let len = min(forceCursor.length, max(0, maxLoc - loc))
                 textView.selectedRange = NSRange(location: loc, length: len)
             }
+
+            if let scroll, let savedOffset {
+                let maxX = max(0, scroll.contentSize.width - scroll.bounds.width)
+                let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
+                scroll.setContentOffset(
+                    CGPoint(
+                        x: min(max(0, savedOffset.x), maxX),
+                        y: min(max(0, savedOffset.y), maxY)
+                    ),
+                    animated: false
+                )
+            }
+
             isApplyingHighlight = false
             // Enter / edits can change lines while highlight suppresses selection callbacks.
-            if let editor = textView as? EditorTextView, !editor.isDraggingCaret {
+            if let editor, !editor.isDraggingCaret {
                 editor.scrollHorizontallyIfLineChanged()
             }
         }
@@ -416,6 +452,13 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         guard let scroll = hostScrollView else { return }
         scroll.setNeedsLayout()
         scroll.layoutIfNeeded()
+    }
+
+    /// Scrolling is owned by `EditorScrollContainer`. UITextView still calls this (even when
+    /// `isScrollEnabled` is false) and walks ancestors — which jumps the viewport when we
+    /// recolor after typing. Explicit caret reveal uses `setContentOffset` instead.
+    override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
+        // Intentionally empty.
     }
 
     /// Size this view (and its text container) to the wider of the viewport and the

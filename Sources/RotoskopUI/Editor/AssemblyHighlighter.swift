@@ -148,20 +148,51 @@ public enum AssemblyHighlighter {
         plainColor: UIColor = .label,
         isAssembly: Bool
     ) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: text, attributes: baseAttributes(font: font, plainColor: plainColor))
+        applyTokenColors(to: result, text: text, plainColor: plainColor, isAssembly: isAssembly)
+        return result
+    }
+
+    /// Recolor an existing storage without replacing its string (avoids UITextView scroll resets).
+    public static func applyHighlighting(
+        to storage: NSTextStorage,
+        font: UIFont,
+        plainColor: UIColor = .label,
+        isAssembly: Bool
+    ) {
+        let fullRange = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        if fullRange.length > 0 {
+            storage.setAttributes(baseAttributes(font: font, plainColor: plainColor), range: fullRange)
+            applyTokenColors(to: storage, text: storage.string, plainColor: plainColor, isAssembly: isAssembly)
+        }
+        storage.endEditing()
+    }
+
+    public static func baseAttributes(
+        font: UIFont,
+        plainColor: UIColor = .label
+    ) -> [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byClipping
         // Standard tab stops every 8 character widths (monospace coding font).
         let charWidth = (" " as NSString).size(withAttributes: [.font: font]).width
         paragraph.tabStops = []
         paragraph.defaultTabInterval = 8 * charWidth
-
-        let base: [NSAttributedString.Key: Any] = [
+        return [
             .font: font,
             .foregroundColor: plainColor,
             .paragraphStyle: paragraph,
         ]
-        let result = NSMutableAttributedString(string: text, attributes: base)
-        guard isAssembly else { return result }
+    }
+
+    private static func applyTokenColors(
+        to storage: NSMutableAttributedString,
+        text: String,
+        plainColor: UIColor,
+        isAssembly: Bool
+    ) {
+        guard isAssembly, !text.isEmpty else { return }
 
         let colors: [TokenKind: UIColor] = [
             .comment: .secondaryLabel,
@@ -177,9 +208,8 @@ public enum AssemblyHighlighter {
             guard token.kind != .plain else { continue }
             let nsRange = NSRange(token.range, in: text)
             guard nsRange.location != NSNotFound else { continue }
-            result.addAttribute(.foregroundColor, value: colors[token.kind] ?? plainColor, range: nsRange)
+            storage.addAttribute(.foregroundColor, value: colors[token.kind] ?? plainColor, range: nsRange)
         }
-        return result
     }
     #endif
 }
