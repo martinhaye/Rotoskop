@@ -139,14 +139,25 @@ struct ExprParser {
     var diagnostics: [Diagnostic] = []
     var location: SourceLocation
     var unnamedCursor: Int
+    /// When true, undefined identifiers and missing `:+` become diagnostics (final assemble pass).
+    var reportUnresolved: Bool
 
-    init(tokens: [Token], symbols: SymbolTable, pc: Int, location: SourceLocation, unnamedCursor: Int, stringEscapes: Bool = true) {
+    init(
+        tokens: [Token],
+        symbols: SymbolTable,
+        pc: Int,
+        location: SourceLocation,
+        unnamedCursor: Int,
+        stringEscapes: Bool = true,
+        reportUnresolved: Bool = false
+    ) {
         self.tokens = tokens
         self.symbols = symbols
         self.pc = pc
         self.location = location
         self.unnamedCursor = unnamedCursor
         self.stringEscapes = stringEscapes
+        self.reportUnresolved = reportUnresolved
     }
 
     mutating func parse() -> Int? {
@@ -294,7 +305,10 @@ struct ExprParser {
                 if let v = symbols.unnamedForward(fromDefIndex: unnamedCursor) {
                     return v
                 }
-                return 0
+                if reportUnresolved {
+                    diag("forward unnamed label :+ not found")
+                }
+                return nil
             }
             if match(.minus) {
                 if let v = symbols.unnamedBackward(fromDefIndex: unnamedCursor) {
@@ -321,6 +335,9 @@ struct ExprParser {
             }
             if let sym = symbols.lookup(full), sym.defined {
                 return sym.value
+            }
+            if reportUnresolved {
+                diag("undefined symbol '\(full)'")
             }
             return nil
         }

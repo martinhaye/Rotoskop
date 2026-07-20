@@ -51,6 +51,11 @@ struct GitSheetView: View {
             if let status {
                 Text(status.branch.map { "Branch: \($0)" } ?? "Detached HEAD")
                     .font(.subheadline)
+                if let tracking = trackingSummary(for: status) {
+                    Text(tracking)
+                        .font(.subheadline)
+                        .foregroundStyle(trackingNeedsPush(status) ? Color.orange : Color.secondary)
+                }
                 if status.files.isEmpty {
                     Text("Working tree clean").foregroundStyle(.secondary)
                 } else {
@@ -69,6 +74,29 @@ struct GitSheetView: View {
             }
             Button("Refresh") { Task { await reload() } }
         }
+    }
+
+    private func trackingSummary(for status: GitStatus) -> String? {
+        guard let upstream = status.upstream else {
+            return status.branch == nil ? nil : "No upstream (push to set)"
+        }
+        let ahead = status.ahead ?? 0
+        let behind = status.behind ?? 0
+        if ahead == 0 && behind == 0 {
+            return "Up to date with \(upstream)"
+        }
+        var parts: [String] = []
+        if ahead > 0 {
+            parts.append("\(ahead) ahead")
+        }
+        if behind > 0 {
+            parts.append("\(behind) behind")
+        }
+        return "\(parts.joined(separator: ", ")) of \(upstream)"
+    }
+
+    private func trackingNeedsPush(_ status: GitStatus) -> Bool {
+        (status.ahead ?? 0) > 0
     }
 
     @ViewBuilder

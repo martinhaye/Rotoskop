@@ -37,7 +37,8 @@ public enum TextScreen {
     }
 
     /// Per-row cells with trailing normal spaces trimmed (inverse spaces kept for cursor).
-    public static func dumpCells(_ memory: Memory) -> [[Cell]] {
+    /// Keeps all 24 rows so the emulator viewport stays a stable 40×24 grid.
+    public static func dumpCells(_ memory: Memory, trimEmptyRows: Bool = false) -> [[Cell]] {
         var lines: [[Cell]] = []
         for row in 0..<rows {
             let base = lineAddress(row)
@@ -50,15 +51,17 @@ public enum TextScreen {
             }
             lines.append(cells)
         }
-        while let first = lines.first, first.isEmpty { lines.removeFirst() }
-        while let last = lines.last, last.isEmpty { lines.removeLast() }
+        if trimEmptyRows {
+            while let first = lines.first, first.isEmpty { lines.removeFirst() }
+            while let last = lines.last, last.isEmpty { lines.removeLast() }
+        }
         return lines
     }
 
     /// Decode `$400–$7FF` Apple II text layout to a trimmed string (uses peek / dump, not hooks).
     /// Inverse/flash spaces become `█` so a cursor (hi-bit cleared) stays visible after trim.
     public static func dump(_ memory: Memory) -> String {
-        dumpCellsToString(dumpCells(memory))
+        dumpCellsToString(dumpCells(memory, trimEmptyRows: true))
     }
 
     public static func dumpCellsToString(_ lines: [[Cell]]) -> String {

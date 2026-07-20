@@ -12,42 +12,21 @@ struct RunTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button {
-                    Task { await workspace.startRun() }
-                } label: {
-                    Label(workspace.isRunning ? "Restart" : "Run", systemImage: "play.fill")
-                }
-                .disabled(workspace.isBuilding)
-
-                Button {
-                    workspace.stopEmulator()
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                }
-                .disabled(!workspace.isRunning)
-
-                Spacer()
-                Text(workspace.runStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
             ZStack {
                 GeometryReader { geo in
-                    let horizontalPadding: CGFloat = 12
+                    let horizontalPadding: CGFloat = 8
+                    let verticalPadding: CGFloat = 4
                     let font = Font(EmulatorScreenFont.make(
-                        fittingWidth: max(0, geo.size.width - horizontalPadding * 2)
+                        fittingWidth: max(0, geo.size.width - horizontalPadding * 2),
+                        fittingHeight: max(0, geo.size.height - verticalPadding * 2)
                     ))
-                    ScrollView {
-                        screenText
-                            .font(font)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(horizontalPadding)
-                    }
+                    // No ScrollView: font is sized to fit all 24 rows in the viewport.
+                    screenText
+                        .font(font)
+                        .lineSpacing(0)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.vertical, verticalPadding)
                 }
                 .background(Color.black.opacity(0.05))
 

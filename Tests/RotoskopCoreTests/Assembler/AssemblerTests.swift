@@ -201,3 +201,89 @@ struct AssemblerMacroTests {
         #expect(r.binary == [0x00, 0x00, 0x00, 0x00, 0x42])
     }
 }
+
+@Suite("Assembler diagnostics")
+struct AssemblerDiagnosticTests {
+    @Test func undefinedJsrFails() {
+        let src = """
+        .org $1000
+        jsr nowhere
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message.contains("nowhere") })
+        #expect(r.diagnostics.contains { $0.location?.line == 2 })
+    }
+
+    @Test func undefinedBranchFails() {
+        let src = """
+        .org $1000
+        bne missing
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message.contains("missing") })
+    }
+
+    @Test func undefinedEquateFails() {
+        let src = """
+        foo = nonexistent
+        .org $1000
+        lda #foo
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message.contains("nonexistent") || $0.message.contains("foo") })
+    }
+
+    @Test func errorDirectiveFails() {
+        let src = """
+        .org $1000
+        .error "boom"
+        nop
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message == "boom" })
+    }
+
+    @Test func unknownMnemonicFails() {
+        let src = """
+        .org $1000
+        foobar
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message.contains("foobar") })
+    }
+
+    @Test func forwardLabelStillResolves() {
+        let src = """
+        .org $1000
+        jsr later
+        later:
+        rts
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "ok.s")
+        #expect(r.succeeded, "diags: \(r.diagnostics)")
+        #expect(r.binary == [0x20, 0x03, 0x10, 0x60])
+    }
+
+    @Test func listingIncludesSourceLine() {
+        let src = """
+        .org $1000
+        lda #$42
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: true))
+        let r = asm.assemble(source: src, file: "list.s")
+        #expect(r.succeeded, "diags: \(r.diagnostics)")
+        #expect(r.listing.contains("lda #$42"))
+        #expect(r.listing.contains("A9 42"))
+    }
+}

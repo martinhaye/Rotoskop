@@ -36,6 +36,24 @@ public struct Diagnostic: Equatable, Sendable, CustomStringConvertible {
         }
         return "\(severity == .error ? "error" : "warning"): \(message)"
     }
+
+    /// Same as `description`, but with `location.file` relativized under `projectRoot` when possible.
+    public func displayDescription(relativeTo projectRoot: String) -> String {
+        guard var location else { return description }
+        location.file = Self.relativize(location.file, to: projectRoot)
+        return Diagnostic(severity, message, at: location).description
+    }
+
+    private static func relativize(_ path: String, to projectRoot: String) -> String {
+        let root = (projectRoot as NSString).standardizingPath
+        let standardized = (path as NSString).standardizingPath
+        if standardized == root { return "" }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        if standardized.hasPrefix(prefix) {
+            return String(standardized.dropFirst(prefix.count))
+        }
+        return standardized
+    }
 }
 
 public struct AssembleResult: Sendable {

@@ -116,7 +116,50 @@ public final class GitRepository: @unchecked Sendable {
             guard let path else { continue }
             files.append(GitFileStatus(path: path, kind: Self.kind(for: flags)))
         }
-        return GitStatus(branch: try currentBranchName(), files: files)
+        let divergence = try trackingDivergence()
+        return GitStatus(
+            branch: try currentBranchName(),
+            files: files,
+            ahead: divergence.ahead,
+            behind: divergence.behind,
+            upstream: divergence.upstream
+        )
+    }
+
+    /// Ahead/behind vs the current branch's configured upstream (usually `origin/<branch>`).
+    private func trackingDivergence() throws -> (ahead: Int?, behind: Int?, upstream: String?) {
+        var head: OpaquePointer?
+        let headCode = git_repository_head(&head, repo)
+        if headCode == GIT_EUNBORNBRANCH.rawValue || headCode == GIT_ENOTFOUND.rawValue {
+            return (nil, nil, nil)
+        }
+        try GitError.check(headCode)
+        defer { git_reference_free(head) }
+        guard let head, git_reference_is_branch(head) == 1 else {
+            return (nil, nil, nil)
+        }
+
+        var upstream: OpaquePointer?
+        let upCode = git_branch_upstream(&upstream, head)
+        if upCode == GIT_ENOTFOUND.rawValue {
+            return (nil, nil, nil)
+        }
+        try GitError.check(upCode)
+        defer { git_reference_free(upstream) }
+        guard let upstream else { return (nil, nil, nil) }
+
+        guard let localOID = git_reference_target(head),
+              let upstreamOID = git_reference_target(upstream)
+        else {
+            return (nil, nil, nil)
+        }
+
+        var ahead: size_t = 0
+        var behind: size_t = 0
+        try GitError.check(git_graph_ahead_behind(&ahead, &behind, repo, localOID, upstreamOID))
+
+        let upstreamName = git_reference_shorthand(upstream).map { String(cString: $0) }
+        return (Int(ahead), Int(behind), upstreamName)
     }
 
     private static func path(from entry: git_status_entry) -> String? {

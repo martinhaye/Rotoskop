@@ -51,11 +51,27 @@ public struct GitFileStatus: Equatable, Identifiable, Sendable {
 public struct GitStatus: Equatable, Sendable {
     public let branch: String?
     public let files: [GitFileStatus]
+    /// Commits on the local branch not present on its upstream (nil if no upstream).
+    public let ahead: Int?
+    /// Commits on upstream not present locally (nil if no upstream).
+    public let behind: Int?
+    /// Upstream short name, e.g. `origin/main` (nil if none configured).
+    public let upstream: String?
+
     public var isClean: Bool { files.isEmpty }
 
-    public init(branch: String?, files: [GitFileStatus]) {
+    public init(
+        branch: String?,
+        files: [GitFileStatus],
+        ahead: Int? = nil,
+        behind: Int? = nil,
+        upstream: String? = nil
+    ) {
         self.branch = branch
         self.files = files
+        self.ahead = ahead
+        self.behind = behind
+        self.upstream = upstream
     }
 }
 

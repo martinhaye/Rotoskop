@@ -43,26 +43,6 @@ struct EditorTabView: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    #if os(iOS)
-                    Button("Select") { notifySelect() }
-                    Button("Select All") { notifySelectAll() }
-                    Divider()
-                    Button("Cut") { notifyCut() }
-                    Button("Copy") { notifyCopy() }
-                    Button("Paste") { notifyPaste() }
-                    Button("Undo") { notifyUndo() }
-                    Divider()
-                    #endif
-                    Button("Save Now") { _ = workspace.saveDocumentNow() }
-                        .disabled(!workspace.isDocumentDirty)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             if workspace.openFilePath != nil {
                 HStack {
@@ -87,32 +67,6 @@ struct EditorTabView: View {
             }
         }
     }
-
-    #if os(iOS)
-    private func notifySelect() {
-        NotificationCenter.default.post(name: .rotoskopEditorSelect, object: nil)
-    }
-
-    private func notifySelectAll() {
-        NotificationCenter.default.post(name: .rotoskopEditorSelectAll, object: nil)
-    }
-
-    private func notifyCut() {
-        UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.cut(_:)), to: nil, from: nil, for: nil)
-    }
-
-    private func notifyCopy() {
-        UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.copy(_:)), to: nil, from: nil, for: nil)
-    }
-
-    private func notifyPaste() {
-        UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.paste(_:)), to: nil, from: nil, for: nil)
-    }
-
-    private func notifyUndo() {
-        UIApplication.shared.sendAction(Selector(("undo:")), to: nil, from: nil, for: nil)
-    }
-    #endif
 }
 
 #if os(iOS)

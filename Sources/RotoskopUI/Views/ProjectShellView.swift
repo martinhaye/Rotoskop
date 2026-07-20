@@ -1,6 +1,10 @@
 import RotoskopGit
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 /// Project shell with portrait tabs (DESIGN §7.2).
 struct ProjectShellView: View {
     let project: ProjectRecord
@@ -17,6 +21,9 @@ struct ProjectShellView: View {
             wrappedValue: ProjectWorkspace(rootURL: root, projectName: project.name)
         )
     }
+
+    private var isRunTab: Bool { workspace.selectedTab == .run }
+    private var isEditorTab: Bool { workspace.selectedTab == .editor }
 
     var body: some View {
         TabView(selection: $workspace.selectedTab) {
@@ -36,17 +43,15 @@ struct ProjectShellView: View {
                 .tabItem { Label("Run", systemImage: "play.fill") }
                 .tag(ProjectWorkspace.Tab.run)
         }
-        .navigationTitle(title)
+        .navigationTitle(isRunTab ? "" : title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         // Editor/Run are tab switches, not pushes — hijack back so it stays in-project.
-        .navigationBarBackButtonHidden(
-            workspace.selectedTab == .editor || workspace.selectedTab == .run
-        )
+        .navigationBarBackButtonHidden(isEditorTab || isRunTab)
         #endif
         .toolbar {
             #if os(iOS)
-            if workspace.selectedTab == .editor {
+            if isEditorTab {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         workspace.selectedTab = .files
@@ -57,7 +62,7 @@ struct ProjectShellView: View {
                         }
                     }
                 }
-            } else if workspace.selectedTab == .run {
+            } else if isRunTab {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         workspace.selectedTab = workspace.tabBeforeRun
@@ -68,24 +73,70 @@ struct ProjectShellView: View {
                         }
                     }
                 }
+                if !workspace.runStatus.isEmpty {
+                    ToolbarItem(placement: .principal) {
+                        Text(workspace.runStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             #endif
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    Task { _ = await workspace.runBuild() }
-                } label: {
-                    Image(systemName: "hammer")
-                }
-                .disabled(workspace.isBuilding)
 
-                Button {
-                    Task { await workspace.startRun() }
-                } label: {
-                    Image(systemName: "play.fill")
-                }
-                .disabled(workspace.isBuilding)
+            if isEditorTab {
+                // Editor needs room for ⋯; Git lives on Files (and other tabs).
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        Task { _ = await workspace.runBuild() }
+                    } label: {
+                        Image(systemName: "hammer")
+                    }
+                    .disabled(workspace.isBuilding)
 
-                Button("Git") { showGit = true }
+                    Button {
+                        Task { await workspace.startRun() }
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .disabled(workspace.isBuilding)
+
+                    editorOverflowMenu
+                }
+            } else if isRunTab {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        Task { await workspace.startRun() }
+                    } label: {
+                        Label(workspace.isRunning ? "Restart" : "Run", systemImage: "play.fill")
+                    }
+                    .disabled(workspace.isBuilding)
+
+                    Button {
+                        workspace.stopEmulator()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .disabled(!workspace.isRunning)
+                }
+            } else {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        Task { _ = await workspace.runBuild() }
+                    } label: {
+                        Image(systemName: "hammer")
+                    }
+                    .disabled(workspace.isBuilding)
+
+                    Button {
+                        Task { await workspace.startRun() }
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .disabled(workspace.isBuilding)
+
+                    Button("Git") { showGit = true }
+                }
             }
         }
         .sheet(isPresented: $showGit) {
@@ -113,6 +164,44 @@ struct ProjectShellView: View {
         }
         .onAppear {
             workspace.setRunTabActive(workspace.selectedTab == .run)
+        }
+    }
+
+    @ViewBuilder
+    private var editorOverflowMenu: some View {
+        Menu {
+            #if os(iOS)
+            Button("Select") {
+                NotificationCenter.default.post(name: .rotoskopEditorSelect, object: nil)
+            }
+            Button("Select All") {
+                NotificationCenter.default.post(name: .rotoskopEditorSelectAll, object: nil)
+            }
+            Divider()
+            Button("Cut") {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponderStandardEditActions.cut(_:)), to: nil, from: nil, for: nil
+                )
+            }
+            Button("Copy") {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponderStandardEditActions.copy(_:)), to: nil, from: nil, for: nil
+                )
+            }
+            Button("Paste") {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponderStandardEditActions.paste(_:)), to: nil, from: nil, for: nil
+                )
+            }
+            Button("Undo") {
+                UIApplication.shared.sendAction(Selector(("undo:")), to: nil, from: nil, for: nil)
+            }
+            Divider()
+            #endif
+            Button("Save Now") { _ = workspace.saveDocumentNow() }
+                .disabled(!workspace.isDocumentDirty)
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
     }
 

@@ -240,16 +240,20 @@ final class ProjectWorkspace: ObservableObject {
 
     func openDiagnostic(_ diagnostic: Diagnostic) {
         guard let location = diagnostic.location else {
-            diagnosticBanner = diagnostic.description
+            diagnosticBanner = displayDescription(for: diagnostic)
             selectedTab = .editor
             return
         }
         let relative = relativize(location.file)
         openFile(relative)
-        diagnosticBanner = diagnostic.description
+        diagnosticBanner = displayDescription(for: diagnostic)
         revealLine = location.line
         revealColumn = max(1, location.column)
         selectedTab = .editor
+    }
+
+    func displayDescription(for diagnostic: Diagnostic) -> String {
+        diagnostic.displayDescription(relativeTo: rootURL.path)
     }
 
     func applyEditorText(_ newText: String) {
@@ -433,9 +437,10 @@ final class ProjectWorkspace: ObservableObject {
         lastBuildSucceeded = result.succeeded
         refreshTree()
 
-        if !result.succeeded, let first = result.diagnostics.first(where: { $0.location != nil }) {
-            // Stay on Build (DESIGN §7.2); user can tap to jump.
-            _ = first
+        if !result.succeeded, let first = result.diagnostics.first(where: { $0.location != nil })
+            ?? result.diagnostics.first {
+            // Surface the first error in the editor banner (DESIGN §3.5 / §7.2).
+            openDiagnostic(first)
         }
         return result.succeeded
     }
@@ -462,7 +467,7 @@ final class ProjectWorkspace: ObservableObject {
             runStatus = "Building first…"
             let ok = await runBuild(switchToBuildTab: false)
             if !ok {
-                selectedTab = .build
+                // openDiagnostic (from runBuild) already switched to Editor with banner.
                 setRunTabActive(false)
                 runStatus = "Build failed — fix diagnostics before Run"
                 return
@@ -733,10 +738,18 @@ final class ProjectWorkspace: ObservableObject {
     }
 
     /// Render Apple II inverse/flash (hi-bit clear) as reverse video.
+    /// Always emits 24 rows so vertical font sizing matches the full text screen.
     private static func attributedScreen(_ lines: [[TextScreen.Cell]]) -> AttributedString {
         var result = AttributedString()
-        for (i, line) in lines.enumerated() {
+        let rowCount = TextScreen.rows
+        for i in 0..<rowCount {
             if i > 0 { result.append(AttributedString("\n")) }
+            let line = i < lines.count ? lines[i] : []
+            if line.isEmpty {
+                // Keep line height for blank rows.
+                result.append(AttributedString(" "))
+                continue
+            }
             for cell in line {
                 var piece = AttributedString(String(cell.character))
                 if cell.inverse {

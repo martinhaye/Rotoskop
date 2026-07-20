@@ -33,7 +33,7 @@ struct BuildTabView: View {
                             workspace.openDiagnostic(diag)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(diag.description)
+                                Text(workspace.displayDescription(for: diag))
                                     .font(.caption.monospaced())
                                     .foregroundStyle(diag.severity == .error ? .red : .primary)
                                     .multilineTextAlignment(.leading)

@@ -107,6 +107,8 @@ Tabs display on the standard 8-column stops. Tab count chooses column; no smart 
 
 - **Autosave always** (debounce at implementation).
 - **Build errors in context:** when a build/assemble diagnostic points at a file/line (and column if known), the Editor can show it **in place**—e.g. highlight/mark the line and surface the message near the caret or in a compact banner—not only as a log line on the Build tab. Jump-from-Build and in-editor display share the same diagnostic.
+- Failed builds open the first located diagnostic in the Editor (banner + caret jump). Unresolved symbols and other assemble errors are reported on a final diagnostic pass — they must not silently assemble as `$0000`.
+- Diagnostic paths shown in the UI are **relative to the project root** (absolute paths remain in the model for includes/CLI).
 
 #### 3.6 Touch & editing chrome
 
@@ -149,7 +151,7 @@ Reference: runix sources under `for_ref/runix/src`, especially `include/base.i` 
 - **One source file → one raw binary** (plus optional listing).
 - **No object files, no ld65, no multi-unit link.** Runix never links multiple `.o` files together today; each module is already a self-contained assemble→binary step.
 - Intended load/base address comes from **`.org`** in the source (as runix does now).
-- **Listing (`.lst` or equivalent)** is required: needed to verify macro expansion / emitted bytes. The app UI must be able to show listings; details deferred to the app-shell / editor sections.
+- **Listing (`.lst` or equivalent)** is required: needed to verify macro expansion / emitted bytes. Listing lines include the original source text alongside address and bytes. The app UI must be able to show listings; details deferred to the app-shell / editor sections.
 
 #### 4.2 In scope (driven by runix usage)
 
@@ -382,9 +384,9 @@ Bottom tabs:
 | **Build** | Run the YAML pipeline; show log; tap errors → Editor at file/line; open listings under `build/` |
 | **Run** | Emulator text screen, start/stop, interactive keyboard; stop reason / dump |
 
-**Git** is not a fifth tab: a nav-bar button opens a Git sheet/screen—status, commit, branch, merge-if-clean, push/pull.
+**Git** is not a fifth tab: a nav-bar button opens a Git sheet/screen—status (including ahead/behind vs upstream), commit, branch, merge-if-clean, push/pull. On the **Editor** tab the Git button yields to the editor **⋯** menu (Select / Cut / Copy / Paste / Undo); Git remains available from Files / Build.
 
-Project nav bar shows repo name + current branch when known; actions: **Git**, plus **Build** / **Run** shortcuts if useful in addition to tabs.
+Project nav bar shows repo name + current branch when known; actions: **Git** (except on Editor/Run), plus **Build** / **Run** shortcuts if useful in addition to tabs. On **Run**, chrome collapses to back + Restart/Stop so the 40×24 text screen can fill the viewport.
 
 **Listings:** browse `build/*.lst` in Files, or jump from Build results. No separate listings mode.
 

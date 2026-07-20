@@ -13,10 +13,14 @@ public final class Assembler {
     private var macros: [String: MacroDef] = [:]
     private var listingLines: [String] = []
     private var pass = 0
+    /// Last pass: report unresolved symbols and other deferred errors (fingerprint may stabilize earlier).
+    private var isFinalPass = false
     private var suppressEmit = false // .if false branches
     private var ifStack: [IfFrame] = []
     private var macroLocalCounter = 0
     private var skippingMacroBody = false
+    /// Raw source text for the line currently being processed (for listings).
+    private var currentSourceLine: String = ""
     /// Pending branch/data fixups for `:+` (unnamed index → list of patch sites).
     private var unnamedForwardFixups: [Int: [(patchAddr: Int, basePC: Int, isRelative: Bool)]] = [:]
 
@@ -60,21 +64,19 @@ public final class Assembler {
         var lastFingerprint = ""
         for p in 1...4 {
             pass = p
-            pc = 0
-            minAddr = Int.max
-            maxAddr = Int.min
-            memory = Array(repeating: nil, count: 0x10000)
-            symbols.resetPass()
-            ifStack = []
-            suppressEmit = false
-            listingLines = []
-            skippingMacroBody = false
-            unnamedForwardFixups = [:]
-            processFile(source: source, file: file, isInclude: false)
+            isFinalPass = false
+            runPass(source: source, file: file)
             let fp = fingerprint()
             if fp == lastFingerprint && p > 1 { break }
             lastFingerprint = fp
         }
+
+        // Always finish with a diagnostic pass. Early fingerprint exit used to skip pass 4,
+        // which swallowed unresolved labels (emitted as $0000) and most error() calls.
+        diagnostics = []
+        isFinalPass = true
+        pass = max(pass, 4)
+        runPass(source: source, file: file)
 
         var binary: [UInt8] = []
         var base: UInt16 = 0
@@ -87,6 +89,20 @@ public final class Assembler {
 
         let listing = options.generateListing ? listingLines.joined(separator: "\n") + "\n" : ""
         return AssembleResult(binary: binary, baseAddress: base, listing: listing, diagnostics: diagnostics)
+    }
+
+    private func runPass(source: String, file: String) {
+        pc = 0
+        minAddr = Int.max
+        maxAddr = Int.min
+        memory = Array(repeating: nil, count: 0x10000)
+        symbols.resetPass()
+        ifStack = []
+        suppressEmit = false
+        listingLines = []
+        skippingMacroBody = false
+        unnamedForwardFixups = [:]
+        processFile(source: source, file: file, isInclude: false)
     }
 
     private func fingerprint() -> String {
@@ -102,6 +118,9 @@ public final class Assembler {
     // MARK: - File processing
 
     private func processFile(source: String, file: String, isInclude: Bool) {
+        let sourceLines = source.split(separator: "\n", omittingEmptySubsequences: false).map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+        }
         var lexer = Lexer(source: source, file: file, stringEscapes: stringEscapes)
         var lineTokens: [Token] = []
         var lineStart = SourceLocation(file: file, line: 1)
@@ -110,7 +129,14 @@ public final class Assembler {
             defer { lineTokens = [] }
             let trimmed = lineTokens.filter { $0.kind != .eol && $0.kind != .eof }
             guard !trimmed.isEmpty else { return }
-            processLine(trimmed, location: lineStart)
+            let idx = lineStart.line - 1
+            let raw: String
+            if idx >= 0, idx < sourceLines.count {
+                raw = sourceLines[idx]
+            } else {
+                raw = trimmed.map(\.text).joined(separator: " ")
+            }
+            processLine(trimmed, location: lineStart, rawLine: raw)
         }
 
         while true {
@@ -130,7 +156,8 @@ public final class Assembler {
         }
     }
 
-    private func processLine(_ tokens: [Token], location: SourceLocation) {
+    private func processLine(_ tokens: [Token], location: SourceLocation, rawLine: String) {
+        currentSourceLine = rawLine
         // Skip macro bodies entirely (already collected), except .endmacro
         if skippingMacroBody {
             if case .dotIdent(let d) = tokens.first?.kind, d == "endmacro" {
@@ -277,7 +304,7 @@ public final class Assembler {
                 symbols.define(name, value: v, isLabel: false)
             }
             noteListing(pc, bytes: [], source: "\(name) = \(v)", location: location)
-        } else if pass < 4 {
+        } else if !isFinalPass {
             // forward — leave undefined
             symbols.define(name, value: 0, isLabel: false)
         } else {
@@ -485,7 +512,7 @@ public final class Assembler {
                 let next = pc + 2
                 var offset = target - next
                 if offset < -128 || offset > 127 {
-                    if pass >= 4 { error("branch out of range", at: location) }
+                    if isFinalPass { error("branch out of range", at: location) }
                     offset = 0
                 }
                 let off8 = Int8(max(-128, min(127, offset)))
@@ -498,7 +525,7 @@ public final class Assembler {
             let next = pc + 2
             var offset = target - next
             if offset < -128 || offset > 127 {
-                if pass >= 4 { error("branch out of range", at: location) }
+                if isFinalPass { error("branch out of range", at: location) }
                 offset = 0
             }
             let off8 = Int8(max(-128, min(127, offset)))
@@ -887,7 +914,11 @@ public final class Assembler {
                 }
                 continue
             }
-            processLine(substituted, location: location)
+            processLine(
+                substituted,
+                location: location,
+                rawLine: substituted.map(\.text).joined(separator: " ")
+            )
         }
     }
 
@@ -1086,10 +1117,14 @@ public final class Assembler {
             pc: pc,
             location: location,
             unnamedCursor: symbols.unnamedDefinedCount,
-            stringEscapes: stringEscapes
+            stringEscapes: stringEscapes,
+            reportUnresolved: isFinalPass
         )
         let v = parser.parse()
-        diagnostics.append(contentsOf: parser.diagnostics)
+        // Only keep expression diagnostics from the final pass (avoids duplicates).
+        if isFinalPass {
+            diagnostics.append(contentsOf: parser.diagnostics)
+        }
         return v
     }
 
@@ -1112,14 +1147,14 @@ public final class Assembler {
     }
 
     private func noteListing(_ addr: Int, bytes: [UInt8], source: String, location: SourceLocation) {
-        guard options.generateListing, pass >= 2 else { return }
+        guard options.generateListing, isFinalPass || pass >= 2 else { return }
         let hex = bytes.prefix(8).map { String(format: "%02X", $0) }.joined(separator: " ")
-        listingLines.append(String(format: "%04X: %-24@ %@", addr, hex as NSString, source as NSString))
+        let text = currentSourceLine.isEmpty ? source : currentSourceLine
+        listingLines.append(String(format: "%04X: %-24@ %@", addr, hex as NSString, text as NSString))
     }
 
     private func error(_ msg: String, at location: SourceLocation) {
-        if pass >= 4 || msg.contains("unsupported") || msg.contains("not found") || msg.contains("error directive") {
-            diagnostics.append(Diagnostic(.error, msg, at: location))
-        }
+        guard isFinalPass else { return }
+        diagnostics.append(Diagnostic(.error, msg, at: location))
     }
 }
