@@ -424,6 +424,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     private var draggingCursor = false
     private var selectionAnchor: Int?
     private weak var caretDrag: UIPanGestureRecognizer?
+    private weak var characterTap: UITapGestureRecognizer?
     private var edgeScrollLink: CADisplayLink?
     /// Prevents `fitContent` from re-entering via layout.
     private var isFittingContent = false
@@ -462,6 +463,16 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         drag.maximumNumberOfTouches = 1
         addGestureRecognizer(drag)
         caretDrag = drag
+
+        // UITextView's private tap interaction can produce a word selection, which our
+        // selection guard then collapses to a word edge. Own single taps so they always
+        // resolve directly to the nearest character insertion position.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleCharacterTap(_:)))
+        tap.delegate = self
+        tap.numberOfTapsRequired = 1
+        tap.require(toFail: drag)
+        addGestureRecognizer(tap)
+        characterTap = tap
     }
 
     required init?(coder: NSCoder) {
@@ -685,11 +696,11 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         return ok
     }
 
-    /// Kill stock double-tap / loupe selection; keep our caret-drag recognizer.
+    /// Kill stock selection gestures; character taps and caret dragging are app-owned.
     private func disarmSystemSelectionGestures() {
         for recognizer in gestureRecognizers ?? [] {
-            if recognizer === caretDrag { continue }
-            if let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired >= 2 {
+            if recognizer === caretDrag || recognizer === characterTap { continue }
+            if let tap = recognizer as? UITapGestureRecognizer {
                 tap.isEnabled = false
             }
             if recognizer is UILongPressGestureRecognizer {
@@ -786,6 +797,14 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
             return selectedRange.location
         }
         return offset(from: beginningOfDocument, to: pos)
+    }
+
+    @objc private func handleCharacterTap(_ gr: UITapGestureRecognizer) {
+        guard gr.state == .ended else { return }
+        _ = becomeFirstResponder()
+        let index = utf16Index(atContentPoint: gr.location(in: self))
+        selectedRange = NSRange(location: index, length: 0)
+        scrollHorizontallyIfLineChanged()
     }
 
     @objc private func handleCaretDrag(_ gr: UIPanGestureRecognizer) {
@@ -928,7 +947,10 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         loupe.isHidden = false
         host.bringSubviewToFront(loupe)
         let fingerInHost = convert(point, to: host)
-        loupe.update(source: self, contentPoint: point, fingerInHost: fingerInHost)
+        let snappedIndex = utf16Index(atContentPoint: point)
+        let caret = caretContentRect(atUTF16: snappedIndex)
+        let samplePoint = CGPoint(x: caret.midX, y: caret.midY)
+        loupe.update(source: self, contentPoint: samplePoint, fingerInHost: fingerInHost)
     }
 
     private func hideLoupe() {
@@ -950,6 +972,9 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === characterTap {
+            return !isDraggingCaret
+        }
         guard gestureRecognizer === caretDrag else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
@@ -1056,6 +1081,18 @@ private final class CaretLoupeView: UIView {
         let format = UIGraphicsImageRendererFormat()
         format.scale = UIScreen.main.scale
         format.opaque = true
+        let textContainerRect = sampleRect.offsetBy(
+            dx: -source.textContainerInset.left,
+            dy: -source.textContainerInset.top
+        )
+        let glyphRange = source.layoutManager.glyphRange(
+            forBoundingRect: textContainerRect,
+            in: source.textContainer
+        )
+        let textOrigin = CGPoint(
+            x: source.textContainerInset.left,
+            y: source.textContainerInset.top
+        )
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: diameter, height: diameter), format: format)
         imageView.image = renderer.image { ctx in
             UIColor.systemBackground.setFill()
@@ -1063,8 +1100,10 @@ private final class CaretLoupeView: UIView {
             ctx.cgContext.saveGState()
             ctx.cgContext.translateBy(x: -sampleRect.minX * magnification, y: -sampleRect.minY * magnification)
             ctx.cgContext.scaleBy(x: magnification, y: magnification)
-            // Text view is not scrolled; bounds.origin is zero and matches contentPoint.
-            source.drawHierarchy(in: source.bounds, afterScreenUpdates: false)
+            // Draw the local TextKit glyphs directly. Snapshotting this document-sized,
+            // non-scrolling UITextView can omit its tiled text while retaining overlays.
+            source.layoutManager.drawBackground(forGlyphRange: glyphRange, at: textOrigin)
+            source.layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: textOrigin)
             ctx.cgContext.restoreGState()
         }
 
