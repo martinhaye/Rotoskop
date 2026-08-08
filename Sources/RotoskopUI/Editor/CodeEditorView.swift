@@ -115,6 +115,7 @@ struct CodeEditorView: UIViewRepresentable {
         var isApplyingHighlight = false
         private var suppressScrollCallback = false
         private var keyboard: AssemblyKeyboardView?
+        private var pendingHighlightRange: NSRange?
 
         init(_ parent: CodeEditorView) {
             self.parent = parent
@@ -125,7 +126,7 @@ struct CodeEditorView: UIViewRepresentable {
                 keyboard = AssemblyKeyboard.install(
                     on: textView,
                     insert: { [weak self] text in
-                        self?.editor?.insertText(text)
+                        self?.insertFromCustomKeyboard(text)
                     },
                     delete: { [weak self] in
                         self?.editor?.deleteBackward()
@@ -138,14 +139,14 @@ struct CodeEditorView: UIViewRepresentable {
                     textView.reloadInputViews()
                 }
             }
-            refreshKeyboardSuggestions(from: textView)
         }
 
-        func refreshKeyboardSuggestions(from textView: UITextView) {
-            guard let keyboard else { return }
-            let ns = textView.text as NSString? ?? ""
-            let loc = min(textView.selectedRange.location, ns.length)
-            keyboard.updateSuggestions(beforeCaret: ns.substring(to: loc))
+        private func insertFromCustomKeyboard(_ text: String) {
+            guard let editor else { return }
+            let range = editor.selectedRange
+            let insertion = editorInsertion(for: text, in: editor, range: range)
+            pendingHighlightRange = editedRange(replacing: range, with: insertion)
+            replace(in: editor, range: range, with: insertion)
         }
 
         @objc func handleSelectNotification() {
@@ -217,8 +218,14 @@ struct CodeEditorView: UIViewRepresentable {
             let newText = textView.text ?? ""
             parent.text = newText
             let selected = textView.selectedRange
-            applyAttributedText(to: textView, string: newText, forceCursor: selected)
-            refreshKeyboardSuggestions(from: textView)
+            let highlightRange = pendingHighlightRange
+            pendingHighlightRange = nil
+            applyAttributedText(
+                to: textView,
+                string: newText,
+                forceCursor: selected,
+                highlightRange: highlightRange
+            )
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -228,7 +235,6 @@ struct CodeEditorView: UIViewRepresentable {
                 // Tap / double-tap must only move the caret unless ⋯ Select mode is on (DESIGN §3.6).
                 let caret = editor.selectedRange.location + editor.selectedRange.length
                 editor.selectedRange = NSRange(location: caret, length: 0)
-                refreshKeyboardSuggestions(from: textView)
                 return
             }
 
@@ -236,7 +242,6 @@ struct CodeEditorView: UIViewRepresentable {
             if !editor.isDraggingCaret {
                 editor.scrollHorizontallyIfLineChanged()
             }
-            refreshKeyboardSuggestions(from: textView)
         }
 
         func textView(
@@ -257,25 +262,33 @@ struct CodeEditorView: UIViewRepresentable {
         ) -> Bool {
             guard textView.markedTextRange == nil else { return true }
 
-            if text == "\t" {
-                replace(in: textView, range: range, with: EditorInputRules.tabInsertion())
-                return false
-            }
-
-            if text == "\n" {
-                let lineInfo = lineContext(in: textView, utf16Offset: range.location)
-                let prefix = utf16Prefix(lineInfo.line, count: lineInfo.offsetInLine)
-                let insertion = EditorInputRules.enterInsertion(
-                    lineBeforeCursor: prefix
-                )
+            if text == "\t" || text == "\n" {
+                let insertion = editorInsertion(for: text, in: textView, range: range)
+                pendingHighlightRange = editedRange(replacing: range, with: insertion)
                 replace(in: textView, range: range, with: insertion)
                 return false
             }
 
+            pendingHighlightRange = editedRange(replacing: range, with: text)
             return true
         }
 
-        func applyAttributedText(to textView: UITextView, string: String, forceCursor: NSRange?) {
+        private func editorInsertion(for text: String, in textView: UITextView, range: NSRange) -> String {
+            if text == "\t" {
+                return EditorInputRules.tabInsertion()
+            }
+            guard text == "\n" else { return text }
+            let lineInfo = lineContext(in: textView, utf16Offset: range.location)
+            let prefix = utf16Prefix(lineInfo.line, count: lineInfo.offsetInLine)
+            return EditorInputRules.enterInsertion(lineBeforeCursor: prefix)
+        }
+
+        func applyAttributedText(
+            to textView: UITextView,
+            string: String,
+            forceCursor: NSRange?,
+            highlightRange: NSRange? = nil
+        ) {
             isApplyingHighlight = true
             let editor = textView as? EditorTextView
 
@@ -294,7 +307,8 @@ struct CodeEditorView: UIViewRepresentable {
                 AssemblyHighlighter.applyHighlighting(
                     to: textView.textStorage,
                     font: font,
-                    isAssembly: parent.fileKind == .assembly
+                    isAssembly: parent.fileKind == .assembly,
+                    characterRange: highlightRange
                 )
             } else {
                 let attributed = AssemblyHighlighter.attributedString(
@@ -333,8 +347,12 @@ struct CodeEditorView: UIViewRepresentable {
             isApplyingHighlight = false
             // Enter / edits can change lines while highlight suppresses selection callbacks.
             if let editor, !editor.isDraggingCaret {
-                editor.scrollHorizontallyIfLineChanged()
+                editor.keepCaretVisibleAfterEdit()
             }
+        }
+
+        private func editedRange(replacing range: NSRange, with replacement: String) -> NSRange {
+            NSRange(location: range.location, length: (replacement as NSString).length)
         }
 
         private func replace(in textView: UITextView, range: NSRange, with replacement: String) {
@@ -409,6 +427,9 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     private var edgeScrollLink: CADisplayLink?
     /// Prevents `fitContent` from re-entering via layout.
     private var isFittingContent = false
+    private var contentMeasurementDirty = true
+    private var cachedContentSize = CGSize.zero
+    private var measuredViewportSize = CGSize.zero
     /// UTF-16 start of the line last used for prefer-left horizontal scroll.
     private var trackedLineStart: Int = -1
     private let loupe = CaretLoupeView()
@@ -450,6 +471,7 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
     /// Ask the host scroll container to re-measure after text changes.
     func relayoutContentSize() {
         guard let scroll = hostScrollView else { return }
+        contentMeasurementDirty = true
         scroll.setNeedsLayout()
         scroll.layoutIfNeeded()
     }
@@ -468,6 +490,11 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         guard viewport.width > 1, !isFittingContent else {
             return bounds.size.width > 1 ? bounds.size : viewport
         }
+        let viewportChanged = abs(measuredViewportSize.width - viewport.width) > 0.5
+            || abs(measuredViewportSize.height - viewport.height) > 0.5
+        if !contentMeasurementDirty, !viewportChanged, cachedContentSize != .zero {
+            return cachedContentSize
+        }
         isFittingContent = true
         defer { isFittingContent = false }
 
@@ -480,10 +507,6 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         )
         textContainer.size = unconstrained
 
-        let fullRange = NSRange(location: 0, length: textStorage.length)
-        if fullRange.length > 0 {
-            layoutManager.invalidateLayout(forCharacterRange: fullRange, actualCharacterRange: nil)
-        }
         layoutManager.ensureLayout(for: textContainer)
         let used = layoutManager.usedRect(for: textContainer)
 
@@ -497,7 +520,11 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
 
         textContainer.size = CGSize(width: width, height: height)
         layoutManager.ensureLayout(for: textContainer)
-        return CGSize(width: width, height: height)
+        let measured = CGSize(width: width, height: height)
+        cachedContentSize = measured
+        measuredViewportSize = viewport
+        contentMeasurementDirty = false
+        return measured
     }
 
     func resetTrackedLine() {
@@ -519,13 +546,39 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
         scrollHorizontallyPreferringLeadingEdge(forceLineTracking: true)
     }
 
+    /// Keep a newly typed caret inside the viewport. Changing lines still prefers
+    /// the leading edge; typing along one long line advances only as needed.
+    func keepCaretVisibleAfterEdit() {
+        let lineStart = currentLineStartUTF16()
+        if trackedLineStart < 0 {
+            trackedLineStart = lineStart
+        } else if lineStart != trackedLineStart {
+            scrollHorizontallyPreferringLeadingEdge(forceLineTracking: true)
+            return
+        }
+
+        ensureHostLayout()
+        guard let scroll = hostScrollView else { return }
+        let caret = caretContentRect(atUTF16: selectedRange.location)
+        let margin: CGFloat = 24
+        let maxOffsetX = max(0, scroll.contentSize.width - scroll.bounds.width)
+        var x = scroll.contentOffset.x
+        if caret.minX < x + margin {
+            x = max(0, caret.minX - margin)
+        } else if caret.maxX > x + scroll.bounds.width - margin {
+            x = min(maxOffsetX, caret.maxX + margin - scroll.bounds.width)
+        }
+        guard abs(scroll.contentOffset.x - x) > 0.5 else { return }
+        scroll.setContentOffset(CGPoint(x: x, y: scroll.contentOffset.y), animated: false)
+    }
+
     /// Scroll the host scroller's X as far left as possible while keeping the caret
     /// visible; if the whole line fits, snap to x = 0 (DESIGN §3.6).
     func scrollHorizontallyPreferringLeadingEdge(forceLineTracking: Bool = false) {
         if forceLineTracking {
             trackedLineStart = currentLineStartUTF16()
         }
-        relayoutContentSize()
+        ensureHostLayout()
         guard let scroll = hostScrollView else { return }
 
         let ns = text as NSString? ?? ""
@@ -561,6 +614,12 @@ final class EditorTextView: UITextView, UIGestureRecognizerDelegate {
             || abs(scroll.contentOffset.y - offset.y) > 0.5
         else { return }
         scroll.setContentOffset(offset, animated: false)
+    }
+
+    private func ensureHostLayout() {
+        guard let scroll = hostScrollView else { return }
+        scroll.setNeedsLayout()
+        scroll.layoutIfNeeded()
     }
 
     private func currentLineStartUTF16() -> Int {

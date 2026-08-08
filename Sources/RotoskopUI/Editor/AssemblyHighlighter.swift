@@ -158,15 +158,34 @@ public enum AssemblyHighlighter {
         to storage: NSTextStorage,
         font: UIFont,
         plainColor: UIColor = .label,
-        isAssembly: Bool
+        isAssembly: Bool,
+        characterRange: NSRange? = nil
     ) {
         let fullRange = NSRange(location: 0, length: storage.length)
+        let requested = characterRange ?? fullRange
+        let targetRange = expandedLineRange(in: storage.string as NSString, intersecting: requested)
         storage.beginEditing()
-        if fullRange.length > 0 {
-            storage.setAttributes(baseAttributes(font: font, plainColor: plainColor), range: fullRange)
-            applyTokenColors(to: storage, text: storage.string, plainColor: plainColor, isAssembly: isAssembly)
+        if targetRange.length > 0 {
+            storage.setAttributes(baseAttributes(font: font, plainColor: plainColor), range: targetRange)
+            applyTokenColors(
+                to: storage,
+                text: storage.string,
+                plainColor: plainColor,
+                isAssembly: isAssembly,
+                characterRange: targetRange
+            )
         }
         storage.endEditing()
+    }
+
+    private static func expandedLineRange(in text: NSString, intersecting range: NSRange) -> NSRange {
+        guard text.length > 0 else { return NSRange(location: 0, length: 0) }
+        let location = min(range.location, text.length)
+        if location == text.length {
+            return text.lineRange(for: NSRange(location: text.length - 1, length: 0))
+        }
+        let length = min(range.length, text.length - location)
+        return text.lineRange(for: NSRange(location: location, length: length))
     }
 
     public static func baseAttributes(
@@ -190,7 +209,8 @@ public enum AssemblyHighlighter {
         to storage: NSMutableAttributedString,
         text: String,
         plainColor: UIColor,
-        isAssembly: Bool
+        isAssembly: Bool,
+        characterRange: NSRange? = nil
     ) {
         guard isAssembly, !text.isEmpty else { return }
 
@@ -204,10 +224,14 @@ public enum AssemblyHighlighter {
             .plain: plainColor,
         ]
 
-        for token in tokens(in: text) {
+        let targetRange = characterRange ?? NSRange(location: 0, length: (text as NSString).length)
+        guard let stringRange = Range(targetRange, in: text) else { return }
+        let segment = String(text[stringRange])
+        for token in tokens(in: segment) {
             guard token.kind != .plain else { continue }
-            let nsRange = NSRange(token.range, in: text)
+            var nsRange = NSRange(token.range, in: segment)
             guard nsRange.location != NSNotFound else { continue }
+            nsRange.location += targetRange.location
             storage.addAttribute(.foregroundColor, value: colors[token.kind] ?? plainColor, range: nsRange)
         }
     }
