@@ -202,6 +202,34 @@ final class ProjectWorkspace: ObservableObject {
         }
     }
 
+    /// Refresh file state after Git changes paths outside the workspace editor.
+    func refreshAfterGitChange(affectedPaths: [String]) {
+        refreshTree()
+        guard let openPath = openFilePath, affectedPaths.contains(openPath) else { return }
+
+        autosaveTask?.cancel()
+        do {
+            documentText = try ProjectFileSystem.readText(
+                rootURL: rootURL,
+                relativePath: openPath,
+                fileManager: fileManager
+            )
+            isDocumentDirty = false
+            statusMessage = "Reloaded from Git"
+            errorMessage = nil
+        } catch {
+            openFilePath = nil
+            documentText = ""
+            isDocumentDirty = false
+            scrollOffsets.removeValue(forKey: openPath)
+            selectedTab = .files
+            statusMessage = nil
+        }
+        diagnosticBanner = nil
+        revealLine = nil
+        revealColumn = nil
+    }
+
     /// Scroll offset to restore for the current file (zero if never opened this session).
     var savedScrollOffset: CGPoint {
         guard let path = openFilePath else { return .zero }

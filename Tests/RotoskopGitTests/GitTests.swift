@@ -154,6 +154,80 @@ struct LocalGitOpsTests {
         let gitDir = repoURL.appendingPathComponent(".git")
         #expect(!FileManager.default.fileExists(atPath: gitDir.appendingPathComponent("MERGE_HEAD").path))
     }
+
+    @Test func discardsOnlyTheSelectedFileToHead() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rotoskop-discard-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try runGit(["init", "-b", "main"], in: root)
+        try runGit(["config", "user.name", "Test"], in: root)
+        try runGit(["config", "user.email", "test@example.com"], in: root)
+
+        let selected = root.appendingPathComponent("selected.txt")
+        let untouched = root.appendingPathComponent("untouched.txt")
+        try "original\n".write(to: selected, atomically: true, encoding: .utf8)
+        try "other original\n".write(to: untouched, atomically: true, encoding: .utf8)
+        try runGit(["add", "."], in: root)
+        try runGit(["commit", "-m", "initial"], in: root)
+
+        try "changed\n".write(to: selected, atomically: true, encoding: .utf8)
+        try "other changed\n".write(to: untouched, atomically: true, encoding: .utf8)
+        try runGit(["add", "selected.txt"], in: root)
+
+        let repo = try GitRepository(opening: root, patStore: InMemoryPATStore())
+        let modifiedDiff = try repo.diff(at: "selected.txt")
+        #expect(modifiedDiff.lines.contains { $0.kind == .deletion && $0.text == "-original" })
+        #expect(modifiedDiff.lines.contains { $0.kind == .addition && $0.text == "+changed" })
+        let affected = try repo.discardChanges(at: "selected.txt")
+        #expect(affected == ["selected.txt"])
+        #expect(try String(contentsOf: selected, encoding: .utf8) == "original\n")
+        #expect(try String(contentsOf: untouched, encoding: .utf8) == "other changed\n")
+        #expect(try repo.status().files.map(\.path) == ["untouched.txt"])
+
+        try FileManager.default.removeItem(at: selected)
+        let deletedDiff = try repo.diff(at: "selected.txt")
+        #expect(deletedDiff.lines.contains { $0.kind == .deletion && $0.text == "-original" })
+        _ = try repo.discardChanges(at: "selected.txt")
+        #expect(try String(contentsOf: selected, encoding: .utf8) == "original\n")
+
+        let untracked = root.appendingPathComponent("untracked.txt")
+        try "new\n".write(to: untracked, atomically: true, encoding: .utf8)
+        let untrackedDiff = try repo.diff(at: "untracked.txt")
+        #expect(untrackedDiff.lines.contains { $0.kind == .addition && $0.text == "+new" })
+        #expect(throws: GitError.self) {
+            try repo.discardChanges(at: "untracked.txt")
+        }
+        #expect(FileManager.default.fileExists(atPath: untracked.path))
+    }
+
+    @Test func discardingRenameRestoresOriginalPath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rotoskop-discard-rename-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try runGit(["init", "-b", "main"], in: root)
+        try runGit(["config", "user.name", "Test"], in: root)
+        try runGit(["config", "user.email", "test@example.com"], in: root)
+
+        let oldURL = root.appendingPathComponent("old.txt")
+        let newURL = root.appendingPathComponent("new.txt")
+        try "original\n".write(to: oldURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "."], in: root)
+        try runGit(["commit", "-m", "initial"], in: root)
+        try runGit(["mv", "old.txt", "new.txt"], in: root)
+
+        let repo = try GitRepository(opening: root, patStore: InMemoryPATStore())
+        let renamed = try #require(repo.status().files.first { $0.kind == .renamed })
+        let renamedDiff = try repo.diff(at: renamed.path)
+        #expect(renamedDiff.lines.contains { $0.kind == .metadata && $0.text.contains("rename from") })
+        #expect(renamedDiff.lines.contains { $0.kind == .metadata && $0.text.contains("rename to") })
+        let affected = try repo.discardChanges(at: renamed.path)
+        #expect(Set(affected) == Set(["old.txt", "new.txt"]))
+        #expect(FileManager.default.fileExists(atPath: oldURL.path))
+        #expect(!FileManager.default.fileExists(atPath: newURL.path))
+        #expect(try repo.status().isClean)
+    }
 }
 
 @Suite("Project store")

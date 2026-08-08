@@ -126,6 +126,114 @@ public final class GitRepository: @unchecked Sendable {
         )
     }
 
+    /// Unified `HEAD`-to-working-tree diff for one changed file.
+    public func diff(at path: String) throws -> GitFileDiff {
+        let entry = try changedEntry(at: path)
+
+        var head: OpaquePointer?
+        try GitError.check(git_repository_head(&head, repo))
+        defer { git_reference_free(head) }
+        var headTree: OpaquePointer?
+        try GitError.check(git_reference_peel(&headTree, head, GIT_OBJECT_TREE))
+        defer { git_tree_free(headTree) }
+
+        var options = git_diff_options()
+        try GitError.check(git_diff_options_init(&options, UInt32(GIT_DIFF_OPTIONS_VERSION)))
+        options.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue
+            | GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+            | GIT_DIFF_SHOW_UNTRACKED_CONTENT.rawValue
+            | GIT_DIFF_INCLUDE_TYPECHANGE.rawValue
+            | GIT_DIFF_DISABLE_PATHSPEC_MATCH.rawValue
+
+        let cStrings = entry.paths.map { strdup($0) }
+        defer { cStrings.forEach { free($0) } }
+        var mutableStrings: [UnsafeMutablePointer<CChar>?] = cStrings
+        var diff: OpaquePointer?
+        try mutableStrings.withUnsafeMutableBufferPointer { buffer in
+            options.pathspec = git_strarray(strings: buffer.baseAddress, count: entry.paths.count)
+            try GitError.check(git_diff_tree_to_workdir_with_index(&diff, repo, headTree, &options))
+        }
+        defer { git_diff_free(diff) }
+
+        var findOptions = git_diff_find_options()
+        try GitError.check(
+            git_diff_find_options_init(&findOptions, UInt32(GIT_DIFF_FIND_OPTIONS_VERSION))
+        )
+        findOptions.flags = GIT_DIFF_FIND_RENAMES.rawValue
+        try GitError.check(git_diff_find_similar(diff, &findOptions))
+
+        guard git_diff_num_deltas(diff) > 0 else {
+            return GitFileDiff(path: path, lines: [])
+        }
+
+        var patch: OpaquePointer?
+        try GitError.check(git_patch_from_diff(&patch, diff, 0))
+        defer { git_patch_free(patch) }
+
+        var buffer = git_buf()
+        try GitError.check(git_patch_to_buf(&buffer, patch))
+        defer { git_buf_dispose(&buffer) }
+        let text = buffer.ptr.map { String(cString: $0) } ?? ""
+        return GitFileDiff(path: path, lines: Self.diffLines(from: text))
+    }
+
+    /// Restore one tracked status entry in both the index and working tree to `HEAD`.
+    /// Returns every path affected (renames include both their old and new paths).
+    @discardableResult
+    public func discardChanges(at path: String) throws -> [String] {
+        let entry = try changedEntry(at: path)
+        if entry.flags & GIT_STATUS_WT_NEW.rawValue != 0,
+           entry.flags & GIT_STATUS_INDEX_NEW.rawValue == 0
+        {
+            throw GitError(.other("Untracked files have no committed version to restore"))
+        }
+        let affectedPaths = entry.paths
+
+        var checkoutOptions = git_checkout_options()
+        try GitError.check(
+            git_checkout_options_init(&checkoutOptions, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+        )
+        checkoutOptions.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue
+            | GIT_CHECKOUT_REMOVE_UNTRACKED.rawValue
+            | GIT_CHECKOUT_DISABLE_PATHSPEC_MATCH.rawValue
+
+        let cStrings = affectedPaths.map { strdup($0) }
+        defer { cStrings.forEach { free($0) } }
+        var mutableStrings: [UnsafeMutablePointer<CChar>?] = cStrings
+        try mutableStrings.withUnsafeMutableBufferPointer { buffer in
+            checkoutOptions.paths = git_strarray(
+                strings: buffer.baseAddress,
+                count: affectedPaths.count
+            )
+            try GitError.check(git_checkout_head(repo, &checkoutOptions))
+        }
+        return affectedPaths
+    }
+
+    private func changedEntry(at path: String) throws -> (paths: [String], flags: UInt32) {
+        var options = git_status_options()
+        try GitError.check(git_status_options_init(&options, UInt32(GIT_STATUS_OPTIONS_VERSION)))
+        options.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue
+            | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
+            | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
+
+        var list: OpaquePointer?
+        try GitError.check(git_status_list_new(&list, repo, &options))
+        defer { git_status_list_free(list) }
+
+        let count = git_status_list_entrycount(list)
+        for i in 0..<count {
+            guard let entry = git_status_byindex(list, i)?.pointee,
+                  Self.path(from: entry) == path
+            else { continue }
+            let paths = Self.paths(from: entry)
+            if !paths.isEmpty {
+                return (paths, entry.status.rawValue)
+            }
+        }
+        throw GitError(.other("No changed file found at \(path)"))
+    }
+
     /// Ahead/behind vs the current branch's configured upstream (usually `origin/<branch>`).
     private func trackingDivergence() throws -> (ahead: Int?, behind: Int?, upstream: String?) {
         var head: OpaquePointer?
@@ -172,6 +280,51 @@ public final class GitRepository: @unchecked Sendable {
             if let p = delta.pointee.old_file.path { return String(cString: p) }
         }
         return nil
+    }
+
+    private static func paths(from entry: git_status_entry) -> [String] {
+        var result: [String] = []
+        for delta in [entry.head_to_index, entry.index_to_workdir] {
+            guard let delta else { continue }
+            for pointer in [delta.pointee.old_file.path, delta.pointee.new_file.path] {
+                guard let pointer else { continue }
+                let path = String(cString: pointer)
+                if !path.isEmpty, !result.contains(path) {
+                    result.append(path)
+                }
+            }
+        }
+        return result
+    }
+
+    private static func diffLines(from text: String) -> [GitFileDiff.Line] {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .map { index, substring in
+                let line = String(substring)
+                let kind: GitFileDiff.Line.Kind
+                if line.hasPrefix("@@") {
+                    kind = .hunk
+                } else if line.hasPrefix("+"), !line.hasPrefix("+++") {
+                    kind = .addition
+                } else if line.hasPrefix("-"), !line.hasPrefix("---") {
+                    kind = .deletion
+                } else if line.hasPrefix("diff ")
+                    || line.hasPrefix("index ")
+                    || line.hasPrefix("---")
+                    || line.hasPrefix("+++")
+                    || line.hasPrefix("new file ")
+                    || line.hasPrefix("deleted file ")
+                    || line.hasPrefix("similarity ")
+                    || line.hasPrefix("rename ")
+                    || line == "\\ No newline at end of file"
+                {
+                    kind = .metadata
+                } else {
+                    kind = .context
+                }
+                return GitFileDiff.Line(id: index, text: line, kind: kind)
+            }
     }
 
     private static func kind(for flags: UInt32) -> GitFileStatus.Kind {

@@ -5,6 +5,7 @@ import SwiftUI
 struct GitSheetView: View {
     let project: ProjectRecord
     @ObservedObject var model: AppModel
+    @ObservedObject var workspace: ProjectWorkspace
     @Environment(\.dismiss) private var dismiss
 
     @State private var status: GitStatus?
@@ -60,12 +61,24 @@ struct GitSheetView: View {
                     Text("Working tree clean").foregroundStyle(.secondary)
                 } else {
                     ForEach(status.files) { file in
-                        HStack {
-                            Text(file.kind.rawValue)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 72, alignment: .leading)
-                            Text(file.path).lineLimit(1)
+                        NavigationLink {
+                            GitFileDiffView(
+                                project: project,
+                                file: file,
+                                model: model,
+                                workspace: workspace,
+                                onReverted: {
+                                    Task { await reload() }
+                                }
+                            )
+                        } label: {
+                            HStack {
+                                Text(file.kind.rawValue)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 72, alignment: .leading)
+                                Text(file.path).lineLimit(1)
+                            }
                         }
                     }
                 }

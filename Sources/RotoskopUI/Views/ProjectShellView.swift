@@ -135,13 +135,17 @@ struct ProjectShellView: View {
                     }
                     .disabled(workspace.isBuilding)
 
-                    Button("Git") { showGit = true }
+                    Button("Git") {
+                        if workspace.saveDocumentNow() {
+                            showGit = true
+                        }
+                    }
                 }
             }
         }
         .sheet(isPresented: $showGit) {
             NavigationStack {
-                GitSheetView(project: project, model: model)
+                GitSheetView(project: project, model: model, workspace: workspace)
             }
         }
         .alert("Error", isPresented: errorPresented) {

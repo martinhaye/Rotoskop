@@ -75,6 +75,36 @@ public struct GitStatus: Equatable, Sendable {
     }
 }
 
+public struct GitFileDiff: Equatable, Sendable {
+    public struct Line: Equatable, Identifiable, Sendable {
+        public enum Kind: Equatable, Sendable {
+            case metadata
+            case hunk
+            case context
+            case addition
+            case deletion
+        }
+
+        public let id: Int
+        public let text: String
+        public let kind: Kind
+
+        public init(id: Int, text: String, kind: Kind) {
+            self.id = id
+            self.text = text
+            self.kind = kind
+        }
+    }
+
+    public let path: String
+    public let lines: [Line]
+
+    public init(path: String, lines: [Line]) {
+        self.path = path
+        self.lines = lines
+    }
+}
+
 public struct GitCommitResult: Equatable, Sendable {
     public let oid: String
     public let message: String
