@@ -46,8 +46,7 @@ enum Opcodes {
         }
         // BIT
         add("bit", .zp, 0x24, 2); add("bit", .abs, 0x2C, 3)
-        // BRK
-        add("brk", .implied, 0x00, 1)
+        // BRK — signature byte required (`brk n`); bare `brk` is an error (breaks runix)
         add("brk", .imm, 0x00, 2) // ca65: `brk n` → $00, signature byte (no '#')
         // Flags / implied
         for (m, op) in [("clc",0x18),("cld",0xD8),("cli",0x58),("clv",0xB8),

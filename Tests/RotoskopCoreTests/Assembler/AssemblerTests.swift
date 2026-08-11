@@ -191,19 +191,29 @@ struct AssemblerMacroTests {
     @Test func brkWithSignature() {
         let src = """
         .org $1000
-        brk
         brk 0
         brk $42
         """
         let asm = Assembler(options: AssembleOptions(generateListing: false))
         let r = asm.assemble(source: src, file: "t.s")
         #expect(r.succeeded, "diags: \(r.diagnostics)")
-        #expect(r.binary == [0x00, 0x00, 0x00, 0x00, 0x42])
+        #expect(r.binary == [0x00, 0x00, 0x00, 0x42])
     }
 }
 
 @Suite("Assembler diagnostics")
 struct AssemblerDiagnosticTests {
+    @Test func bareBrkFails() {
+        let src = """
+        .org $1000
+        brk
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains { $0.message.contains("needs an operand") })
+    }
+
     @Test func undefinedJsrFails() {
         let src = """
         .org $1000
@@ -260,6 +270,30 @@ struct AssemblerDiagnosticTests {
         let r = asm.assemble(source: src, file: "bad.s")
         #expect(!r.succeeded)
         #expect(r.diagnostics.contains { $0.message.contains("foobar") })
+    }
+
+    @Test func macroRedefinitionFails() {
+        let src = """
+        .macro poke addr, val
+        lda #val
+        sta addr
+        .endmacro
+        .macro poke addr
+        lda #0
+        sta addr
+        .endmacro
+        .org $1000
+        poke $10, $42
+        """
+        let asm = Assembler(options: AssembleOptions(generateListing: false))
+        let r = asm.assemble(source: src, file: "bad.s")
+        #expect(!r.succeeded)
+        #expect(r.diagnostics.contains {
+            $0.message.contains("poke") && $0.message.contains("redefined")
+        })
+        #expect(r.diagnostics.contains { $0.location?.line == 5 })
+        // First definition wins; invocation still expands the original body.
+        #expect(r.binary == [0xA9, 0x42, 0x85, 0x10])
     }
 
     @Test func forwardLabelStillResolves() {

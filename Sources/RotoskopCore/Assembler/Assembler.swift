@@ -60,6 +60,8 @@ public final class Assembler {
         macroLocalCounter = 0
 
         collectMacros(source: source, file: file)
+        // Macro collection can report redefinitions before passes run; keep those.
+        let collectDiagnostics = diagnostics
 
         var lastFingerprint = ""
         for p in 1...4 {
@@ -73,7 +75,7 @@ public final class Assembler {
 
         // Always finish with a diagnostic pass. Early fingerprint exit used to skip pass 4,
         // which swallowed unresolved labels (emitted as $0000) and most error() calls.
-        diagnostics = []
+        diagnostics = collectDiagnostics
         isFinalPass = true
         pass = max(pass, 4)
         runPass(source: source, file: file)
@@ -467,7 +469,8 @@ public final class Assembler {
             return
         }
 
-        // ca65 BRK signature: `brk n` emits $00 + low byte of n (no '#' required)
+        // ca65 BRK signature: `brk n` emits $00 + low byte of n (no '#' required).
+        // Bare `brk` is rejected above (needs an operand) — a lone $00 breaks runix.
         if mnem == "brk" {
             let v = evalExpr(operandTokens, location: location) ?? 0
             emitByte(0x00)
@@ -1060,7 +1063,15 @@ public final class Assembler {
             guard !t.isEmpty else { return }
             if var c = collecting {
                 if case .dotIdent(let d) = t.first?.kind, d == "endmacro" {
-                    macros[c.name] = MacroDef(params: c.params, body: c.body)
+                    if macros[c.name] != nil {
+                        diagnostics.append(Diagnostic(
+                            .error,
+                            "macro '\(c.name)' redefined",
+                            at: c.loc
+                        ))
+                    } else {
+                        macros[c.name] = MacroDef(params: c.params, body: c.body)
+                    }
                     collecting = nil
                     return
                 }

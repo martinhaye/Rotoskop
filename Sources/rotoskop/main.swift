@@ -81,7 +81,7 @@ enum RotoskopMain {
             let engine = try BuildEngine(projectRoot: root)
             let result = engine.build()
             for d in result.diagnostics {
-                fputs("\(d)\n", stderr)
+                fputs("\(d.displayDescription(relativeTo: engine.projectRoot))\n", stderr)
             }
             if result.succeeded {
                 fputs("Build OK (\(result.artifacts.count) artifacts)\n", stderr)
