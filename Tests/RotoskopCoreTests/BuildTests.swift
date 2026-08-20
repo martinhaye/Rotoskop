@@ -33,9 +33,14 @@ struct BuildTests {
         profiles:
           halt:
             keys: ["halt\\n"]
+        tests:
+          files:
+            - src/rtest/*.s
+            - tests/*.test
         """
         let cfg = try ProjectConfig.parse(yaml: yaml)
         #expect(cfg.name == "demo")
+        #expect(cfg.tests.files == ["src/rtest/*.s", "tests/*.test"])
         #expect(cfg.steps.count == 2)
         #expect(cfg.run.start == 0x1000)
         #expect(cfg.run.load.count == 1)

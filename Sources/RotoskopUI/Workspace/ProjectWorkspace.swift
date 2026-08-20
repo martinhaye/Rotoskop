@@ -25,6 +25,8 @@ final class ProjectWorkspace: ObservableObject {
     @Published var selectedTab: Tab = .files
     /// Tab to restore when leaving Run via the hijacked back button (edit↔run loop).
     var tabBeforeRun: Tab = .files
+    /// Tab to restore when leaving Build via the hijacked back button (edit↔build↔test loop).
+    var tabBeforeBuild: Tab = .files
     @Published var tree: [ProjectFileSystem.Node] = []
     @Published var openFilePath: String?
     @Published var documentText: String = ""
@@ -43,7 +45,9 @@ final class ProjectWorkspace: ObservableObject {
     @Published var buildDiagnostics: [Diagnostic] = []
     @Published var buildArtifacts: [String] = []
     @Published var isBuilding = false
+    @Published var isTesting = false
     @Published var lastBuildSucceeded: Bool?
+    @Published var lastTestSucceeded: Bool?
 
     @Published var screenText = ""
     @Published var screenDisplay = AttributedString()
@@ -444,6 +448,7 @@ final class ProjectWorkspace: ObservableObject {
         buildDiagnostics = []
         buildArtifacts = []
         lastBuildSucceeded = nil
+        lastTestSucceeded = nil
         defer { isBuilding = false }
 
         let root = projectRootPath
@@ -471,6 +476,62 @@ final class ProjectWorkspace: ObservableObject {
             openDiagnostic(first)
         }
         return result.succeeded
+    }
+
+    // MARK: - Tests
+
+    /// Run guest tests from yaml `tests.files`; replaces the Build log with the test report.
+    func runTests() async {
+        _ = saveDocumentNow()
+        selectedTab = .build
+        isTesting = true
+        lastTestSucceeded = nil
+        buildLog = ["Testing…"]
+        buildDiagnostics = []
+        defer { isTesting = false }
+
+        let root = projectRootPath
+        let outcome: Result<(log: [String], succeeded: Bool), Error> = await Task.detached(priority: .userInitiated) {
+            do {
+                let config = try ProjectConfig.load(fromProjectRoot: root)
+                if BuildDirtiness.isDirty(projectRoot: root, config: config) {
+                    let engine = BuildEngine(projectRoot: root, config: config)
+                    let built = engine.build()
+                    if !built.succeeded {
+                        var lines = built.log
+                        lines.append("Build failed — fix diagnostics before testing")
+                        return .success((lines, false))
+                    }
+                }
+                let summary = try TestRunner.run(projectRoot: root, config: config)
+                var lines: [String] = []
+                for r in summary.results {
+                    if r.passed {
+                        lines.append("ok   \(r.spec.name)")
+                    } else {
+                        lines.append("FAIL \(r.spec.name)")
+                        let detail = TestRunner.formatFailure(r)
+                        if !detail.isEmpty {
+                            lines.append(contentsOf: detail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+                        }
+                    }
+                }
+                let total = summary.results.count
+                lines.append("\(summary.passedCount) passed, \(summary.failedCount) failed, \(total) total")
+                return .success((lines, summary.succeeded))
+            } catch {
+                return .failure(error)
+            }
+        }.value
+
+        switch outcome {
+        case .success(let value):
+            buildLog = value.log
+            lastTestSucceeded = value.succeeded
+        case .failure(let error):
+            buildLog = ["FAILED: \(error)"]
+            lastTestSucceeded = false
+        }
     }
 
     // MARK: - Run

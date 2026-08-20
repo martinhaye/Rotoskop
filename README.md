@@ -18,7 +18,7 @@ Steps **0–7** done: scaffold through Build/Run integration. v1 implementation 
 | `Sources/RotoskopGit` | Thin libgit2 wrapper (PAT, clone/push/pull, branches), Keychain, project store |
 | `.build/checkouts/libgit2/include/git2/` | libgit2 C headers (present after `swift build`; see DESIGN §1.4) |
 | `Sources/RotoskopUI` | SwiftUI shell (repos, Files, Editor, Build, Run, Git) |
-| `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`) |
+| `Sources/rotoskop` | Mac CLI (`build`, `assemble`, `run`, `test`) |
 | `Tests/` | Unit/integration tests (no UI device required) |
 | `Apps/Rotoskop` | iOS app target (Xcode project) |
 | `Scripts/run-on-device.sh` | Build + install + launch on a connected iPhone |
@@ -34,13 +34,14 @@ swift test
 swift run rotoskop --help
 ```
 
-**Stay green** (after meaningful changes): `swift test`; `swift run rotoskop build for_ref/runix`; `swift run rotoskop run for_ref/runix --profile halt`. When touching the iOS app: `Scripts/run-on-device.sh`.
+**Stay green** (after meaningful changes): `swift test`; `swift run rotoskop build for_ref/runix`; `swift run rotoskop test for_ref/runix halt`. When touching the iOS app: `Scripts/run-on-device.sh`.
 
 ### Against Runix
 
 ```bash
 RUNIX=for_ref/runix
 swift run rotoskop build "$RUNIX"
+swift run rotoskop test "$RUNIX"
 swift run rotoskop run "$RUNIX" --profile halt -v --screen
 ```
 

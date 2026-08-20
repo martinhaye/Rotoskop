@@ -24,6 +24,7 @@ struct ProjectShellView: View {
 
     private var isRunTab: Bool { workspace.selectedTab == .run }
     private var isEditorTab: Bool { workspace.selectedTab == .editor }
+    private var isBuildTab: Bool { workspace.selectedTab == .build }
 
     var body: some View {
         TabView(selection: $workspace.selectedTab) {
@@ -46,8 +47,8 @@ struct ProjectShellView: View {
         .navigationTitle(isRunTab ? "" : title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        // Editor/Run are tab switches, not pushes — hijack back so it stays in-project.
-        .navigationBarBackButtonHidden(isEditorTab || isRunTab)
+        // Editor/Build/Run are tab switches, not pushes — hijack back so it stays in-project.
+        .navigationBarBackButtonHidden(isEditorTab || isBuildTab || isRunTab)
         #endif
         .toolbar {
             #if os(iOS)
@@ -59,6 +60,17 @@ struct ProjectShellView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
                             Text("Files")
+                        }
+                    }
+                }
+            } else if isBuildTab {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        workspace.selectedTab = workspace.tabBeforeBuild
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text(backLabel(for: workspace.tabBeforeBuild))
                         }
                     }
                 }
@@ -92,14 +104,14 @@ struct ProjectShellView: View {
                     } label: {
                         Image(systemName: "hammer")
                     }
-                    .disabled(workspace.isBuilding)
+                    .disabled(workspace.isBuilding || workspace.isTesting)
 
                     Button {
                         Task { await workspace.startRun() }
                     } label: {
                         Image(systemName: "play.fill")
                     }
-                    .disabled(workspace.isBuilding)
+                    .disabled(workspace.isBuilding || workspace.isTesting)
 
                     editorOverflowMenu
                 }
@@ -110,7 +122,7 @@ struct ProjectShellView: View {
                     } label: {
                         Label(workspace.isRunning ? "Restart" : "Run", systemImage: "play.fill")
                     }
-                    .disabled(workspace.isBuilding)
+                    .disabled(workspace.isBuilding || workspace.isTesting)
 
                     Button {
                         workspace.stopEmulator()
@@ -126,14 +138,14 @@ struct ProjectShellView: View {
                     } label: {
                         Image(systemName: "hammer")
                     }
-                    .disabled(workspace.isBuilding)
+                    .disabled(workspace.isBuilding || workspace.isTesting)
 
                     Button {
                         Task { await workspace.startRun() }
                     } label: {
                         Image(systemName: "play.fill")
                     }
-                    .disabled(workspace.isBuilding)
+                    .disabled(workspace.isBuilding || workspace.isTesting)
 
                     Button("Git") {
                         if workspace.saveDocumentNow() {
@@ -163,6 +175,9 @@ struct ProjectShellView: View {
         .onChange(of: workspace.selectedTab) { previous, tab in
             if tab == .run, previous != .run {
                 workspace.tabBeforeRun = previous
+            }
+            if tab == .build, previous != .build {
+                workspace.tabBeforeBuild = previous
             }
             workspace.setRunTabActive(tab == .run)
         }
@@ -221,7 +236,7 @@ struct ProjectShellView: View {
         case .files: return "Files"
         case .editor: return "Editor"
         case .build: return "Build"
-        case .run: return "Files"
+        case .run: return "Run"
         }
     }
 

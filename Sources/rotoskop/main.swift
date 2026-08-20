@@ -17,6 +17,8 @@ enum RotoskopMain {
             exit(Int32(assembleCommand(Array(args.dropFirst()))))
         case "build":
             exit(Int32(buildCommand(Array(args.dropFirst()))))
+        case "test":
+            exit(Int32(testCommand(Array(args.dropFirst()))))
         case "-h", "--help", "help":
             printUsage()
             exit(0)
@@ -35,6 +37,7 @@ enum RotoskopMain {
           rotoskop build [project-root]
           rotoskop assemble <source.s> -o <out.bin> [-I dir] [--list out.lst]
           rotoskop run <project-root|rotoskop.yaml|config.json> [options]
+          rotoskop test [project-root] [name ...] [options]
 
         Build:
           Reads rotoskop.yaml; runs generate / assemble / pack_image steps.
@@ -51,6 +54,15 @@ enum RotoskopMain {
         With a project root or rotoskop.yaml, uses that file's run: section
         (disk, load, start, keys, max_instructions). JSON configs remain
         supported for legacy pim65-style simulator configs.
+
+        Test:
+          Discovers files from yaml tests.files, parses ; @test comments,
+          builds if dirty, then runs each case against run: (disk/load/start).
+          Names are stems or globs (testbcd1, halt, testbcd*).
+
+        Test options:
+          -v, --verbose              Print instruction counts
+          --no-build                 Skip building even if the project is dirty
 
         Assemble options:
           -o, --output PATH          Output binary (required)
@@ -95,6 +107,85 @@ enum RotoskopMain {
             fputs("Error: \(error)\n", stderr)
             return 1
         }
+    }
+
+    static func testCommand(_ args: [String]) -> Int {
+        var root: String?
+        var names: [String] = []
+        var noBuild = false
+        var verbose = false
+
+        var i = 0
+        while i < args.count {
+            let a = args[i]
+            switch a {
+            case "-h", "--help":
+                printUsage()
+                return 0
+            case "-v", "--verbose":
+                verbose = true
+            case "--no-build":
+                noBuild = true
+            default:
+                if a.hasPrefix("-") {
+                    fputs("Error: unknown option \(a)\n", stderr)
+                    return 1
+                }
+                if root == nil, looksLikeProjectRoot(a) {
+                    root = a
+                } else {
+                    names.append(a)
+                }
+            }
+            i += 1
+        }
+
+            let projectRoot = ((root ?? ".") as NSString).standardizingPath
+        do {
+            let config = try ProjectConfig.load(fromProjectRoot: projectRoot)
+            if !noBuild, BuildDirtiness.isDirty(projectRoot: projectRoot, config: config) {
+                let engine = BuildEngine(projectRoot: projectRoot, config: config)
+                let result = engine.build()
+                for d in result.diagnostics {
+                    fputs("\(d.displayDescription(relativeTo: engine.projectRoot))\n", stderr)
+                }
+                guard result.succeeded else { return 1 }
+                if verbose {
+                    fputs("Build OK (\(result.artifacts.count) artifacts)\n", stderr)
+                }
+            }
+            let summary = try TestRunner.run(projectRoot: projectRoot, config: config, names: names)
+            var failed = 0
+            for r in summary.results {
+                let suffix = verbose ? " (\(r.instructionCount) instructions)" : ""
+                if r.passed {
+                    print("ok   \(r.spec.name)\(suffix)")
+                } else {
+                    failed += 1
+                    print("FAIL \(r.spec.name)\(suffix)")
+                    print(TestRunner.formatFailure(r))
+                }
+            }
+            let total = summary.results.count
+            print("\(total - failed) passed, \(failed) failed, \(total) total")
+            return failed == 0 ? 0 : 1
+        } catch {
+            fputs("Error: \(error)\n", stderr)
+            return 1
+        }
+    }
+
+    static func looksLikeProjectRoot(_ arg: String) -> Bool {
+        if arg == "." || arg == ".." { return true }
+        if arg.contains("/") { return true }
+        if arg.hasSuffix(".yaml") || arg.hasSuffix(".yml") { return true }
+        let path = (arg as NSString).standardizingPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        let yaml = (path as NSString).appendingPathComponent("rotoskop.yaml")
+        return FileManager.default.fileExists(atPath: yaml)
     }
 
     static func assembleCommand(_ args: [String]) -> Int {

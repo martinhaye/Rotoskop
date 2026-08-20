@@ -298,10 +298,17 @@ run:
   start: 0x1000
   max_instructions: 100000
 
+tests:
+  files:
+    - src/rtest/*.s
+    - tests/*.test
+
 profiles:
   halt:
     keys: ["halt\n"]
 ```
+
+**Guest tests (`tests:` / `rotoskop test`):** globbed files (assembly `.s` and comment-only `.test`) with `; @test` directives (`keys`, `max_instructions`, `expect` substring, `stop success|limit|any`). Each file is one case; inherit `run:` disk/load/start. CLI: `rotoskop test [project-root] [name …]` (stems/globs). Builds if dirty unless `--no-build`. Named `profiles:` remain for `rotoskop run --profile`.
 
 #### 5.3 Status
 
@@ -457,7 +464,7 @@ Steps **0–7** are complete. Implementation order finished for v1.
 2. ~~Flesh out sections one at a time~~ — **done.**
 3. Implement to this document; resist scope creep. Do one implementation-order step at a time; do not reopen finished steps unless a regression appears.
 4. Prefer concrete decisions over inventing architecture ahead of need.
-5. **Stay green:** `swift test`; `rotoskop build for_ref/runix`; `rotoskop run for_ref/runix --profile halt`. When changing the iOS app, also `Scripts/run-on-device.sh` (see README).
+5. **Stay green:** `swift test`; `rotoskop build for_ref/runix`; `rotoskop test for_ref/runix halt`. When changing the iOS app, also `Scripts/run-on-device.sh` (see README).
 6. **Git:** commit Rotoskop at major milestones; do not push unless asked. Runix edits live only under `for_ref/runix` (its own `.git` if needed).
 
 ## Section backlog (order flexible)

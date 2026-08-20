@@ -86,7 +86,7 @@ public enum BuildDirtiness {
                     ? root
                     : (root as NSString).appendingPathComponent(dirPart)
                 guard let files = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
-                for f in files where matchesGlob(filePat, f) {
+                for f in files where SourceGlob.matches(filePat, f) {
                     result.append((dir as NSString).appendingPathComponent(f))
                 }
             } else {
@@ -114,14 +114,6 @@ public enum BuildDirtiness {
             }
         }
         return result
-    }
-
-    private static func matchesGlob(_ pattern: String, _ name: String) -> Bool {
-        if pattern == "*" { return true }
-        if pattern.hasPrefix("*.") {
-            return name.hasSuffix(String(pattern.dropFirst()))
-        }
-        return pattern == name
     }
 
     private static func modificationDate(of path: String, fileManager: FileManager) -> Date? {

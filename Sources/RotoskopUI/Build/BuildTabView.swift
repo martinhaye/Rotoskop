@@ -5,6 +5,8 @@ import SwiftUI
 struct BuildTabView: View {
     @ObservedObject var workspace: ProjectWorkspace
 
+    private var isBusy: Bool { workspace.isBuilding || workspace.isTesting }
+
     var body: some View {
         List {
             Section {
@@ -17,9 +19,24 @@ struct BuildTabView: View {
                         Label("Build", systemImage: "hammer")
                     }
                 }
-                .disabled(workspace.isBuilding)
+                .disabled(isBusy)
 
-                if let ok = workspace.lastBuildSucceeded {
+                Button {
+                    Task { await workspace.runTests() }
+                } label: {
+                    if workspace.isTesting {
+                        Label("Testing…", systemImage: "checkmark.diamond.fill")
+                    } else {
+                        Label("Run tests", systemImage: "checkmark.diamond")
+                    }
+                }
+                .disabled(isBusy || workspace.lastBuildSucceeded != true)
+
+                if let ok = workspace.lastTestSucceeded {
+                    Text(ok ? "Last test run succeeded" : "Last test run failed")
+                        .font(.subheadline)
+                        .foregroundStyle(ok ? Color.secondary : Color.red)
+                } else if let ok = workspace.lastBuildSucceeded {
                     Text(ok ? "Last build succeeded" : "Last build failed")
                         .font(.subheadline)
                         .foregroundStyle(ok ? Color.secondary : Color.red)
@@ -50,7 +67,7 @@ struct BuildTabView: View {
             }
 
             if !workspace.buildLog.isEmpty {
-                Section("Log") {
+                Section(workspace.lastTestSucceeded != nil ? "Test log" : "Log") {
                     ForEach(Array(workspace.buildLog.enumerated()), id: \.offset) { _, line in
                         Text(line)
                             .font(.caption.monospaced())
@@ -59,7 +76,7 @@ struct BuildTabView: View {
                 }
             }
 
-            if !workspace.buildArtifacts.isEmpty {
+            if !workspace.buildArtifacts.isEmpty, workspace.lastTestSucceeded == nil {
                 Section("Artifacts") {
                     ForEach(workspace.buildArtifacts, id: \.self) { path in
                         Button {
@@ -81,7 +98,7 @@ struct BuildTabView: View {
             }
         }
         .overlay {
-            if workspace.isBuilding {
+            if isBusy {
                 ProgressView()
                     .padding()
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))

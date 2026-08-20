@@ -8,6 +8,7 @@ public struct ProjectConfig: Sendable {
     public var steps: [BuildStep]
     public var run: RunProfile
     public var profiles: [String: RunProfile]
+    public var tests: TestsConfig
 
     public init(
         name: String = "project",
@@ -15,7 +16,8 @@ public struct ProjectConfig: Sendable {
         buildDir: String = "build",
         steps: [BuildStep] = [],
         run: RunProfile = RunProfile(),
-        profiles: [String: RunProfile] = [:]
+        profiles: [String: RunProfile] = [:],
+        tests: TestsConfig = TestsConfig()
     ) {
         self.name = name
         self.includeDirs = includeDirs
@@ -23,6 +25,7 @@ public struct ProjectConfig: Sendable {
         self.steps = steps
         self.run = run
         self.profiles = profiles
+        self.tests = tests
     }
 
     public static func load(fromProjectRoot root: String) throws -> ProjectConfig {
@@ -61,7 +64,8 @@ public struct ProjectConfig: Sendable {
             buildDir: buildDir,
             steps: steps,
             run: run,
-            profiles: profiles
+            profiles: profiles,
+            tests: parseTestsNode(root["tests"])
         )
     }
 
@@ -71,6 +75,14 @@ public struct ProjectConfig: Sendable {
             throw BuildError.invalidConfig("unknown run profile '\(profile)'")
         }
         return run.merging(overlay)
+    }
+}
+
+public struct TestsConfig: Sendable {
+    public var files: [String]
+
+    public init(files: [String] = []) {
+        self.files = files
     }
 }
 
@@ -200,6 +212,19 @@ private func orderedStringListMap(_ mapping: Yams.Node.Mapping?) -> [(String, [S
         }
     }
     return result
+}
+
+private func parseTestsNode(_ node: Yams.Node?) -> TestsConfig {
+    guard let map = node?.mapping else { return TestsConfig() }
+    let files: [String]
+    if let s = map["files"]?.string {
+        files = [s]
+    } else if let arr = map["files"]?.sequence {
+        files = arr.compactMap(\.string)
+    } else {
+        files = []
+    }
+    return TestsConfig(files: files)
 }
 
 private func parseRunNode(_ node: Yams.Node?, base: RunProfile = RunProfile()) -> RunProfile {

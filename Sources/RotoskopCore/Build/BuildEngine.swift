@@ -191,7 +191,7 @@ public final class BuildEngine {
                     ? base
                     : (underBuild ? abs("\(config.buildDir)/\(dirPart)") : abs(dirPart))
                 let files = try FileManager.default.contentsOfDirectory(atPath: dir)
-                let matched = files.filter { matchesGlob(filePat, $0) }.sorted()
+                let matched = files.filter { SourceGlob.matches(filePat, $0) }.sorted()
                 for f in matched {
                     result.append((dir as NSString).appendingPathComponent(f))
                 }
@@ -205,14 +205,6 @@ public final class BuildEngine {
             }
         }
         return result
-    }
-
-    private func matchesGlob(_ pattern: String, _ name: String) -> Bool {
-        if pattern == "*" { return true }
-        if pattern.hasPrefix("*.") {
-            return name.hasSuffix(String(pattern.dropFirst()))
-        }
-        return pattern == name
     }
 }
 
